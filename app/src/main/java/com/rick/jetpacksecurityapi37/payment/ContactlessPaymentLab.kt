@@ -31,6 +31,15 @@ class ContactlessPaymentLab(private val context: Context) {
         )
     }
 
+    /**
+     *  Pass or fail based on device NFC hardware.
+     *
+     *  FEATURE_NFC
+     *      System level check for feature flag
+     *      hardware support for NFC near field communication
+     *
+     * @return true if device has FEATURE_NFC
+     */
     private fun checkNfcFeature(): PolicyCheck {
         val has = context.packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
         return PolicyCheck(
@@ -45,6 +54,12 @@ class ContactlessPaymentLab(private val context: Context) {
         )
     }
 
+    /**
+     *  Pass or fail based on NFC radio being enabled.
+     *      User preference, can change while app is running.
+     *
+     * @return true if device has NFC radio and is on
+     */
     private fun checkNfcEnabled(): PolicyCheck {
         val adapter = NfcAdapter.getDefaultAdapter(context)
         val enabled = adapter?.isEnabled == true
@@ -60,6 +75,12 @@ class ContactlessPaymentLab(private val context: Context) {
         )
     }
 
+    /**
+     *  Pass or fail based on device HCE hardware.
+     *      Critical for payment apps.
+     *
+     * @return true if device has FEATURE_NFC_HOST_CARD_EMULATION
+     */
     private fun checkHceFeature(): PolicyCheck {
         val has = context.packageManager.hasSystemFeature(
             PackageManager.FEATURE_NFC_HOST_CARD_EMULATION,
@@ -76,6 +97,14 @@ class ContactlessPaymentLab(private val context: Context) {
         )
     }
 
+    /**
+     *  Pass or fail based on device lock screen.
+     *      Hard requirement for HCE payments on Android.
+     *      Payment tokens are stored in secure hardware.
+     *      PIN/Patterna and Password NOT Biometrics
+     *
+     * @return true based on isDeviceSecure flag
+     */
     private fun checkLockScreen(): PolicyCheck {
         val km = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         val secure = km.isDeviceSecure
@@ -91,6 +120,13 @@ class ContactlessPaymentLab(private val context: Context) {
         )
     }
 
+    /**
+     *  Pass or fail based on default payment app.
+     *      Use secure settings
+     *      Read current default HCE host card emulation payment application
+     *
+     * @return  true if device has a default payment app set
+     */
     private fun checkDefaultPaymentApp(): PolicyCheck {
         val component = Settings.Secure.getString(
             context.contentResolver,
