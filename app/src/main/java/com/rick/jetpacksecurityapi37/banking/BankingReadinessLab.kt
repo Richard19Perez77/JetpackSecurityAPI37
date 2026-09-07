@@ -19,6 +19,12 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 
+/**
+ * BankingReadinessLab:
+ *  Gives common industry practices on banking checks for APK or a commercial banking app to be installed.
+ *
+ * @property context -
+ */
 class BankingReadinessLab(private val context: Context) {
 
     fun evaluate(): BankingReadinessReport {
@@ -48,6 +54,11 @@ class BankingReadinessLab(private val context: Context) {
         return BankingReadinessReport(allowed = allowed, summary = summary, checks = checks)
     }
 
+    /**
+     * Pass or fail based on SDK min version of typical banks of this writing.
+     *
+     * @return DeviceCheck
+     */
     private fun checkOsVersion(): DeviceCheck {
         val sdk = Build.VERSION.SDK_INT
         val passed = sdk >= TYPICAL_BANK_MIN_SDK
@@ -235,8 +246,16 @@ class BankingReadinessLab(private val context: Context) {
     }
 
     private fun checkStrongBox(): DeviceCheck {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            return DeviceCheck(
+                name = "StrongBox (optional)",
+                passed = false,
+                blocking = false,
+                detail = "SDK ${Build.VERSION.SDK_INT} < 28. StrongBox shipped in Android 9. Optional; does not fail the banking banner.",
+            )
+        }
         val feature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
-        val created = if (feature && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val created = if (feature) {
             runCatching {
                 val key = getOrCreateProbeKey(ALIAS_SB, strongBox = true)
                 val info = keyInfo(key)

@@ -1,5 +1,13 @@
 package com.rick.jetpacksecurityapi37.banking
 
+/**
+ *
+ *
+ * @property name
+ * @property passed
+ * @property blocking
+ * @property detail
+ */
 data class DeviceCheck(
     val name: String,
     val passed: Boolean,
