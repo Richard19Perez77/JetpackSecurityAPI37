@@ -5,7 +5,6 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
-import android.security.keystore.UserNotAuthenticatedException
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -34,27 +33,17 @@ class BiometricKeyLab(private val context: Context) {
     }
 
     suspend fun encryptSample(activity: FragmentActivity): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
         return try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-            val encrypted = cipher.doFinal(SAMPLE.toByteArray())
-            "Encrypted without extra prompt (auth still valid). bytes=${encrypted.size}"
-        } catch (_: UserNotAuthenticatedException) {
-            authenticateThenEncrypt(activity)
+            val unlocked = awaitPrompt(activity, BiometricPrompt.CryptoObject(cipher))
+            val encrypted = unlocked.doFinal(SAMPLE.toByteArray())
+            "Encrypted after BIOMETRIC_STRONG unlocked this Cipher. bytes=${encrypted.size}"
         } catch (t: KeyPermanentlyInvalidatedException) {
             "Key invalidated after biometric change: ${t.message}"
         } catch (t: Throwable) {
             "${t.javaClass.simpleName}: ${t.message}"
         }
-    }
-
-    private suspend fun authenticateThenEncrypt(activity: FragmentActivity): String {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        val crypto = BiometricPrompt.CryptoObject(cipher)
-        val promptCipher = awaitPrompt(activity, crypto)
-        val encrypted = promptCipher.doFinal(SAMPLE.toByteArray())
-        return "Encrypted after biometric prompt. bytes=${encrypted.size}"
     }
 
     private suspend fun awaitPrompt(
@@ -66,6 +55,7 @@ class BiometricKeyLab(private val context: Context) {
             ContextCompat.getMainExecutor(activity),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    if (!cont.isActive) return
                     val unlocked = result.cryptoObject?.cipher
                     if (unlocked != null) {
                         cont.resume(unlocked)
@@ -75,12 +65,14 @@ class BiometricKeyLab(private val context: Context) {
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    if (!cont.isActive) return
                     cont.resumeWith(Result.failure(IllegalStateException("($errorCode) $errString")))
                 }
 
                 override fun onAuthenticationFailed() = Unit
             },
         )
+        cont.invokeOnCancellation { prompt.cancelAuthentication() }
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Unlock Jetpack Security key")
@@ -104,13 +96,10 @@ class BiometricKeyLab(private val context: Context) {
             .setUserAuthenticationRequired(true)
             .setInvalidatedByBiometricEnrollment(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(
-                AUTH_VALIDITY_SECONDS,
-                KeyProperties.AUTH_BIOMETRIC_STRONG,
-            )
+            builder.setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG)
         } else {
             @Suppress("DEPRECATION")
-            builder.setUserAuthenticationValidityDurationSeconds(AUTH_VALIDITY_SECONDS)
+            builder.setUserAuthenticationValidityDurationSeconds(-1)
         }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(builder.build())
@@ -119,9 +108,8 @@ class BiometricKeyLab(private val context: Context) {
 
     private companion object {
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
-        const val ALIAS = "jetsec_biometric_aes"
+        const val ALIAS = "jetsec_biometric_aes_per_use"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val AUTH_VALIDITY_SECONDS = 15
         const val SAMPLE = "biometric-secret"
     }
 }

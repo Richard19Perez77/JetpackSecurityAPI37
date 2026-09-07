@@ -27,7 +27,7 @@ fun CatalogScreen(onOpen: (LabDestination) -> Unit) {
             Column(modifier = Modifier.padding(vertical = 16.dp)) {
                 Text("Jetpack Security · API 37", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Simple labs for review. Details are in OVERVIEW.md. Storage and files can switch previous vs current APIs.",
+                    "Simple labs for review. Start with BEGINNER.md, then OVERVIEW.md. Storage and files can switch previous vs current APIs.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

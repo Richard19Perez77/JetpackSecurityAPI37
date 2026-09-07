@@ -37,4 +37,16 @@ class AppAuthenticatorPolicyTest {
             authenticator.checkAppIdentity(context.packageName),
         )
     }
+
+    @Test
+    fun undeclaredPackageDeniedUnderAllowPolicy() {
+        val authenticator = TestAuthenticatorFactory.acceptDeclaredPackages(
+            context,
+            TestR.xml.test_app_authenticator,
+        )
+        assertEquals(
+            AppAuthenticator.SIGNATURE_NO_MATCH,
+            authenticator.checkAppIdentity("com.not.in.xml"),
+        )
+    }
 }

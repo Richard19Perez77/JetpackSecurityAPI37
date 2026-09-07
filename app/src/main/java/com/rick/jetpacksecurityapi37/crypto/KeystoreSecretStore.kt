@@ -24,6 +24,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
     override suspend fun save(key: String, value: String) = withContext(Dispatchers.IO) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, aesKey())
+        cipher.updateAAD(key.toByteArray(StandardCharsets.UTF_8))
         val ciphertext = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val packed = cipher.iv + ciphertext
         prefs.edit()
@@ -40,6 +41,7 @@ class KeystoreSecretStore(context: Context) : SecretStore {
         val ciphertext = packed.copyOfRange(IV_SIZE, packed.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(TAG_BITS, iv))
+        cipher.updateAAD(key.toByteArray(StandardCharsets.UTF_8))
         String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
     }
 

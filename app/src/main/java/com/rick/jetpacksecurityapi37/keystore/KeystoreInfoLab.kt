@@ -31,12 +31,14 @@ class KeystoreInfoLab(private val context: Context) {
             val info = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
             buildString {
                 appendLine("alias=$alias requestStrongBox=$requestStrongBox")
-                appendLine("  insideSecureHardware=${info.isInsideSecureHardware}")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     appendLine("  securityLevel=${info.securityLevel}")
                     appendLine(
                         "  strongBox=${info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX}",
                     )
+                } else {
+                    @Suppress("DEPRECATION")
+                    appendLine("  insideSecureHardware=${info.isInsideSecureHardware}")
                 }
             }
         } catch (t: Throwable) {

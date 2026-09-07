@@ -1,8 +1,10 @@
-# Jetpack Security on API 37 (beginner overview)
+﻿# Jetpack Security on API 37
 
 This project is a **review catalog**, not a production app. It targets **compile/target SDK 37** and keeps **minSdk 24** so the older Jetpack Security crypto APIs still compile and run.
 
-Read this file first. The app screens are thin labs: a short explanation, a few buttons, and a result string. Storage and file labs can **switch API eras** (previous Jetpack helper vs current recommendation vs raw platform APIs).
+**Start with [BEGINNER.md](BEGINNER.md)** (tap the app, then open one file). This file is the deeper reference.
+
+The app screens are thin labs: a short explanation, a few buttons, and a result string. Storage and file labs can **switch API eras** (previous Jetpack helper vs current recommendation vs raw platform APIs). Policy labs (banking, FLAG_SECURE, overlay, installer, NFC) use one Evaluate button and a green/red banner.
 
 ---
 
@@ -20,7 +22,7 @@ On this project’s date, the group looks like this:
 | `androidx.security:security-app-authenticator` 1.0.0 | Check that another app is signed with the cert you expect | Stable |
 | `androidx.security:security-app-authenticator-testing` 1.0.0 | Fake those checks in tests | Stable; used by `:authenticator-testing` |
 | `androidx.security:security-identity-credential` 1.0.0-alpha03 | Mobile identity documents (for example mDL) | Still alpha |
-| `androidx.security:security-state` 1.1.0-beta02 | Read security patch levels (SPL) and related state | Beta; richer on API 35+ devices |
+| `androidx.security:security-state` 1.1.0-beta03 | Read security patch levels (SPL) and related state | Beta; richer on API 35+ devices |
 | `androidx.security:security-state-provider` | OEM/OTA apps **publish** update info | Privileged; this app **mocks** it instead of hosting a real provider |
 
 This app also shows **neighbor platform APIs** people often mix up with Jetpack Security:
@@ -29,6 +31,7 @@ This app also shows **neighbor platform APIs** people often mix up with Jetpack 
 - **BiometricPrompt** — unlock a Keystore key with a fingerprint/face
 - **Credential Manager** — passwords and passkeys for *user login*, not app-to-app identity
 - **Auto Backup / data extraction rules** — ciphertext must not restore without keys
+- **Window / PackageManager / NFC** — screenshot flags, installer source, tap-to-pay hardware (policy labs)
 
 ---
 
@@ -108,7 +111,7 @@ Era name in the UI: **Current: Tink + DataStore**.
 
 ### Raw Keystore neighbor
 
-The third era, **Neighbor: Android Keystore**, skips Tink. It uses `KeyGenerator` + `AES/GCM/NoPadding`, prepends the 12-byte IV, and stores Base64 in ordinary SharedPreferences. This is what you do when you want fewer libraries. You must get IV, tag length, and key spec right yourself. Tink exists so fewer apps invent broken crypto.
+The third era, **Neighbor: Android Keystore**, skips Tink. It uses `KeyGenerator` + `AES/GCM/NoPadding`, prepends the 12-byte IV, calls `Cipher.updateAAD` with the preference key (same “do not swap values” idea as Tink), and stores Base64 in ordinary SharedPreferences. This is what you do when you want fewer libraries. You must get IV, tag length, AAD, and key spec right yourself. Tink exists so fewer apps invent broken crypto.
 
 ---
 
@@ -138,7 +141,7 @@ A realistic upgrade path:
 
 This app’s **Crypto migration** lab does that with a fake `session_token`. Production code should also handle type variants (not only strings), crashes mid-migration, and multiple processes.
 
-**Backup warning:** if Auto Backup restored the old encrypted XML onto a phone with a **new** Keystore, decryption throws. Exclude those files (see §10).
+**Backup warning:** if Auto Backup restored the old encrypted XML onto a phone with a **new** Keystore, decryption throws. Exclude those files (see Â§10).
 
 ---
 
@@ -247,7 +250,7 @@ KeyGenParameterSpec.Builder(...)
   .setUserAuthenticationRequired(true)
 ```
 
-Then `Cipher.init` throws `UserNotAuthenticatedException` until the user authenticates. You pass the same `Cipher` into `BiometricPrompt.CryptoObject` so the OS unlocks **that** crypto object (not a generic “user is in” flag you might forget to check).
+Then `Cipher.init` prepares the object, and you pass that same `Cipher` into `BiometricPrompt.CryptoObject` so the OS unlocks **that** crypto object (not a generic “user is in” flag you might forget to check). This lab uses a **per-use** key (timeout 0 / validity `-1` on older APIs). A 15-second validity window is a different pattern: `Cipher.init` throws `UserNotAuthenticatedException` until the user authenticates, and you must not mix that with CryptoObject.
 
 `BIOMETRIC_STRONG` is the Class 3 authenticator, which is what you want for keys. Emulators without an enrolled fingerprint will report `BIOMETRIC_ERROR_NONE_ENROLLED` or a prompt error. That is expected.
 
@@ -303,6 +306,38 @@ What you **can** do is score the same device signals banks use after install (an
 
 Play Integrity’s `MEETS_STRONG_INTEGRITY` token still needs your backend. This lab only checks that Play services exist.
 
+Shared types for this banner style live in `policy/PolicyReport.kt` (`PolicyCheck` rows, blocking vs optional).
+
+---
+
+## 13. Screenshot / FLAG_SECURE (neighbor)
+
+Banks and password managers set `WindowManager.LayoutParams.FLAG_SECURE` on login and transfer screens. The system then blocks screenshots, recents thumbnails, and most screen-share of that window.
+
+The catalog lab applies the flag to **this** activity while the screen is open, then scores picture-in-picture, split-screen, and extra displays. Screen-capture callbacks (`Activity.registerScreenCaptureCallback`, API 34+) are asynchronous; the lab does not pretend it can prove a kernel recorder is absent.
+
+---
+
+## 14. Overlay / tapjacking (neighbor)
+
+A second window can draw a fake Confirm button over yours. `View.filterTouchesWhenObscured` ignores those taps. On API 31+, `Window.setHideOverlayWindows(true)` (permission `HIDE_OVERLAY_WINDOWS`) hides `TYPE_APPLICATION_OVERLAY` windows.
+
+The lab also fails if *this* app can draw overlays (`Settings.canDrawOverlays`). It cannot list every overlay-capable package without `QUERY_ALL_PACKAGES`. Enabled accessibility services are **optional** so TalkBack is not treated as malware.
+
+---
+
+## 15. Installer source (neighbor)
+
+`PackageManager.getInstallSourceInfo` (API 30+) reports `installingPackageName`, `initiatingPackageName`, and on API 33+ `packageSource` (`PACKAGE_SOURCE_STORE` vs `LOCAL_FILE` / `DOWNLOADED_FILE`).
+
+Play-only banks want `com.android.vending` and a non-debuggable APK. An Android Studio debug run **fails on purpose**. This is not a Play Integrity token.
+
+---
+
+## 16. Contactless payment / NFC (neighbor)
+
+Host-card-emulation wallets need `FEATURE_NFC`, `NfcAdapter.isEnabled`, `FEATURE_NFC_HOST_CARD_EMULATION`, and a secure lock screen. The default payment component (`Settings.Secure` key `nfc_payment_default_component`) is optional here because this catalog is not a wallet. No card network is called.
+
 ---
 
 ## How the sample app is laid out
@@ -317,6 +352,11 @@ Play Integrity’s `MEETS_STRONG_INTEGRITY` token still needs your backend. This
   biometric/       auth-bound AES key
   credentials/     Credential Manager probe
   banking/         typical banking-app device policy
+  capture/         FLAG_SECURE on this window
+  overlay/         tapjacking / hide overlays
+  install/         Play vs sideload vs debug
+  payment/         NFC + HCE floor
+  policy/          shared PASS/FAIL report
   backup/          lists excluded paths
   ui/              catalog + simple labs
 
@@ -324,7 +364,7 @@ Play Integrity’s `MEETS_STRONG_INTEGRITY` token still needs your backend. This
   TestAuthenticatorFactory for instrumented tests
 ```
 
-Switch **API era** on Encrypted preferences and Encrypted files. Other labs are a single current API with notes about older/newer OS versions.
+Switch **API era** on Encrypted preferences and Encrypted files. Policy labs share one Evaluate button and a green/red banner.
 
 ---
 
@@ -343,209 +383,7 @@ Still important, but not `androidx.security` and not implemented here:
 
 ## Suggested reading order
 
-1. This file through §2 (keys + current prefs).
-2. App screens: Encrypted preferences (try all three eras), then Migration.
-3. App Authenticator + `:authenticator-testing` tests.
-4. Keystore, Backup, Biometric.
-5. Identity Credential and Security State (specialized).
-6. Credential Manager (login neighbor).
-7. Banking app readiness (device policy banks use; not a specific bank’s Play listing).
+Follow [BEGINNER.md](BEGINNER.md) in the app. This file is the background for those steps.
 
 Official index: [Jetpack Security releases](https://developer.android.com/jetpack/androidx/releases/security).
-
----
-
-# SecurityStateLab
-
-This is a **security state inspection class** for Android applications, specifically designed for API level 37 (Android 15+). Let me break down what this class does:
-
-## Purpose
-`SecurityStateLab` provides a diagnostic tool to inspect and report on the security state of an Android device and application.
-
-## Key Components
-
-### Constructor
-- Takes a `Context` parameter to access system services
-
-### Main Method: `inspect()`
-Returns a formatted string report containing:
-1. **Build information** - Compile/target SDK (37) and device SDK version
-2. **Security patch level** - The device's security patch date
-3. **Live security state** - Real-time data from the system
-4. **Mock OEM provider report** - Sample data showing what an OEM update provider might return
-
-### `readLiveBundle()`
-- Uses `SecurityStateManagerCompat` (a compatibility wrapper for Android's security state APIs)
-- Calls `getGlobalSecurityState()` to retrieve a bundle of security-related information
-- Handles errors gracefully (returns error messages or indicates empty bundles, which is common on emulators)
-- Formats the bundle contents as key-value pairs
-
-### `mockOemProviderReport()`
-- Provides **sample/demo data** showing what an OEM (Original Equipment Manufacturer) update provider might report
-- Contains mock update information for:
-  - **System component** - SPL: 2026-09-01
-  - **Vendor component** - SPL: 2026-08-05  
-  - **Kernel component** - SPL: 6.1.lts-demo
-- Includes a note explaining that this is just a demonstration and that apps typically consume `SecurityStateManagerCompat` rather than hosting their own update services
-
-## Important Notes
-
-1. **API 37+ Feature**: This uses Android's newer security state APIs introduced in SDK 35+
-2. **Compatibility**: Uses `Compat` versions of classes for backward compatibility
-3. **Real vs Mock Data**: The live data comes from the actual device, while the OEM report is just sample data for demonstration
-4. **Emulator Handling**: Gracefully handles empty bundles which are common on emulators
-
-## Use Case
-This class would typically be used in a security/diagnostics screen within an app to:
-- Display the device's current security posture
-- Help users understand their device's update status
-- Debug security-related issues
-- Demonstrate the use of Android's security state APIs
-
-The class is well-documented and handles edge cases (like emulators) appropriately, making it suitable for both production use and educational purposes.
-
----
-
-Great question! As an introductory developer, let me give you a **practical, no-nonsense answer**:
-
-## Do You Need to Use This? 
-
-**Short answer: Probably not.** For 90%+ of apps, you can completely ignore this.
-
-**Longer answer:** Only if you're building security-critical apps (banking, healthcare, government) or need to enforce specific security policies.
-
----
-
-## When You WOULD Use This (Real Scenarios)
-
-### 1. **Conditional Feature Locking**
-```kotlin
-// Only enable biometric login if device is reasonably secure
-val state = SecurityStateLab(context).inspect()
-if (hasRecentSecurityPatch(state)) {
-    enableBiometricLogin()
-} else {
-    showWarningAndUsePinOnly()
-}
-```
-
-### 2. **Security Warnings**
-```kotlin
-// Warn users with outdated security patches
-if (isSecurityPatchOlderThan(state, "2025-01-01")) {
-    showDialog("Your device hasn't received security updates in over a year")
-}
-```
-
-### 3. **Compliance Requirements**
-```kotlin
-// For apps handling sensitive data (HIPAA, GDPR, PCI-DSS)
-if (getDeviceSecurityLevel() < MINIMUM_SECURITY_LEVEL) {
-    preventAccess("Device doesn't meet security requirements")
-}
-```
-
----
-
-## When You DON'T Need This (Most Apps)
-
-✅ Simple games  
-✅ Social media apps  
-✅ News/weather apps  
-✅ Shopping apps (non-payment)  
-✅ Utility apps (flashlight, notes, etc.)  
-
-**Just let the Android system handle security automatically.**
-
----
-
-## What You Should ACTUALLY Focus On (More Important)
-
-| Priority | What to Do | Why |
-|----------|------------|-----|
-| **1** | Use HTTPS for all network calls | Prevents man-in-the-middle attacks |
-| **2** | Encrypt sensitive data with Android Keystore | Protects user data |
-| **3** | Validate all user input | Prevents injection attacks |
-| **4** | Use ProGuard/R8 obfuscation | Makes reverse engineering harder |
-| **5** | Store passwords with hashing (not plaintext!) | Critical security practice |
-| **6** | This SecurityStateManager stuff | **Last priority** |
-
----
-
-## Practical Example: Should You Use It?
-
-### Scenario: Building a Banking App
-**YES**, you should check:
-- Security patch level (ensure device has recent updates)
-- Report suspiciously old patches to your backend
-- Potentially block transactions on compromised devices
-
-### Scenario: Building a Cooking Recipe App
-**NO**, don't waste time on this. Users just want to see recipes!
-
----
-
-## How to Use It (If You Decide To)
-
-```kotlin
-class MySecurityPolicy(private val context: Context) {
-    
-    private val securityLab = SecurityStateLab(context)
-    
-    fun isDeviceSecure(): Boolean {
-        val report = securityLab.inspect()
-        
-        // Parse the security patch date
-        val patchDate = extractPatchDate(report) // "2026-09-01"
-        val sixMonthsAgo = getDateSixMonthsAgo()
-        
-        // 1. Check if security patch is recent
-        if (patchDate < sixMonthsAgo) {
-            return false // Device hasn't been updated in 6+ months
-        }
-        
-        // 2. Check if WebView version is recent (optional)
-        val webviewVersion = extractWebViewVersion(report) // "150.0.7871.181"
-        if (webviewVersion < 140) { // Arbitrary threshold
-            return false // Older WebView might have vulnerabilities
-        }
-        
-        return true
-    }
-    
-    fun getSecurityLevel(): SecurityLevel {
-        return when {
-            isDeviceSecure() -> SecurityLevel.GREEN
-            isDeviceSecure() && !hasRecentPatch() -> SecurityLevel.YELLOW
-            else -> SecurityLevel.RED
-        }
-    }
-}
-```
-
----
-
-## My Recommendation for You
-
-**For learning purposes**: YES, play with it! Understanding system security is valuable.
-- Print the report in a debug screen
-- Experiment with different emulator/device configurations
-- See how the values change
-
-**For production apps**: ONLY if your app has specific security requirements.
-- Otherwise, save your energy for more impactful security practices (HTTPS, encryption, input validation)
-
----
-
-## The Bottom Line
-
-This is **advanced, optional security monitoring**. Focus on:
-1. ✅ HTTPS everywhere
-2. ✅ Secure data storage
-3. ✅ User authentication
-4. ✅ Regular updates
-
-**Then**, if you still have time and your app handles sensitive data, consider using this API. Otherwise, **ignore it** and ship your app! 😊
-
----
 

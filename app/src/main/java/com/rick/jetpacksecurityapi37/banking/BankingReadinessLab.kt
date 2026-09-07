@@ -9,25 +9,23 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import androidx.biometric.BiometricManager
+import com.rick.jetpacksecurityapi37.policy.PolicyCheck
+import com.rick.jetpacksecurityapi37.policy.PolicyReport
 import java.io.File
 import java.security.KeyStore
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 
 /**
- * BankingReadinessLab:
- *  Gives common industry practices on banking checks for APK or a commercial banking app to be installed.
- *
- * @property context -
+ * Scores device signals a typical retail banking app uses after install
+ * (and that Play uses for certified devices). This cannot answer “will bank X
+ * install here?” — country, ABI, that APK’s minSdk, and Play Integrity are private.
  */
 class BankingReadinessLab(private val context: Context) {
 
-    fun evaluate(): BankingReadinessReport {
+    fun evaluate(): PolicyReport {
         val checks = listOf(
             checkOsVersion(),
             checkNotEmulator(),
@@ -44,25 +42,24 @@ class BankingReadinessLab(private val context: Context) {
             checkStrongBiometric(),
             checkAdb(),
         )
-        val allowed = checks.none { it.blocking && !it.passed }
-        val summary = if (allowed) {
-            "No blocking failures. A typical retail banking app could likely be installed from Play and reach a login screen. Individual banks still apply their own Play Integrity / country / version rules, which this device-side scan cannot see."
-        } else {
-            val names = checks.filter { it.blocking && !it.passed }.joinToString { it.name }
-            "Blocking failures: $names. Play may still let you download an APK, but most banking apps refuse enroll/login on this class of device."
-        }
-        return BankingReadinessReport(allowed = allowed, summary = summary, checks = checks)
+        return PolicyReport.from(
+            checks = checks,
+            allowedSummary = "No blocking failures. A typical retail banking app could likely be installed from Play and reach a login screen. Individual banks still apply their own Play Integrity / country / version rules, which this device-side scan cannot see.",
+            blockedPrefix = "Play may still let you download an APK, but most banking apps refuse enroll/login. Blocking failures:",
+            allowedTitle = "ALLOWED (typical banking policy)",
+            blockedTitle = "NOT ALLOWED (typical banking policy)",
+        )
     }
 
     /**
      * Pass or fail based on SDK min version of typical banks of this writing.
      *
-     * @return DeviceCheck
+     * @return PolicyCheck
      */
-    private fun checkOsVersion(): DeviceCheck {
+    private fun checkOsVersion(): PolicyCheck {
         val sdk = Build.VERSION.SDK_INT
         val passed = sdk >= TYPICAL_BANK_MIN_SDK
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Android version",
             passed = passed,
             blocking = true,
@@ -70,7 +67,7 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkNotEmulator(): DeviceCheck {
+    private fun checkNotEmulator(): PolicyCheck {
         val fingerprint = Build.FINGERPRINT.lowercase(Locale.US)
         val product = Build.PRODUCT.lowercase(Locale.US)
         val hardware = Build.HARDWARE.lowercase(Locale.US)
@@ -84,7 +81,7 @@ class BankingReadinessLab(private val context: Context) {
             hardware.contains("ranchu") ||
             model.contains("emulator") ||
             manufacturer.contains("genymotion")
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Physical device (not emulator)",
             passed = !emulator,
             blocking = true,
@@ -96,13 +93,13 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkOfficialBuild(): DeviceCheck {
+    private fun checkOfficialBuild(): PolicyCheck {
         val tags = Build.TAGS.orEmpty()
         val type = Build.TYPE.orEmpty()
         val testKeys = tags.contains("test-keys")
         val userBuild = type == "user"
         val passed = !testKeys && userBuild
-        return DeviceCheck(
+        return PolicyCheck(
             name = "User production build",
             passed = passed,
             blocking = true,
@@ -110,10 +107,10 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkLockScreen(): DeviceCheck {
+    private fun checkLockScreen(): PolicyCheck {
         val km = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
         val secure = km.isDeviceSecure
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Secure lock screen",
             passed = secure,
             blocking = true,
@@ -125,7 +122,7 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkHardwareKeystore(): DeviceCheck {
+    private fun checkHardwareKeystore(): PolicyCheck {
         return try {
             val key = getOrCreateProbeKey(ALIAS_HW, strongBox = false)
             val info = keyInfo(key)
@@ -136,18 +133,19 @@ class BankingReadinessLab(private val context: Context) {
                 @Suppress("DEPRECATION")
                 info.isInsideSecureHardware
             }
-            DeviceCheck(
+            PolicyCheck(
                 name = "Hardware-backed Keystore",
                 passed = hardware,
                 blocking = true,
                 detail = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     "KeyInfo.securityLevel=${info.securityLevel} (TEE=${KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT}, StrongBox=${KeyProperties.SECURITY_LEVEL_STRONGBOX})."
                 } else {
+                    @Suppress("DEPRECATION")
                     "isInsideSecureHardware=${info.isInsideSecureHardware}"
                 },
             )
         } catch (t: Throwable) {
-            DeviceCheck(
+            PolicyCheck(
                 name = "Hardware-backed Keystore",
                 passed = false,
                 blocking = true,
@@ -156,9 +154,9 @@ class BankingReadinessLab(private val context: Context) {
         }
     }
 
-    private fun checkPlayStore(): DeviceCheck {
+    private fun checkPlayStore(): PolicyCheck {
         val installed = isInstalled("com.android.vending")
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Google Play Store present",
             passed = installed,
             blocking = true,
@@ -170,9 +168,9 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkPlayServices(): DeviceCheck {
+    private fun checkPlayServices(): PolicyCheck {
         val installed = isInstalled("com.google.android.gms")
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Google Play services present",
             passed = installed,
             blocking = true,
@@ -184,11 +182,11 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkVerifiedBoot(): DeviceCheck {
+    private fun checkVerifiedBoot(): PolicyCheck {
         val state = systemProperty("ro.boot.verifiedbootstate").ifBlank { "unknown" }
         val passed = state.equals("green", ignoreCase = true)
         val known = state != "unknown"
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Verified Boot",
             passed = if (known) passed else true,
             blocking = known,
@@ -196,12 +194,12 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkBootloader(): DeviceCheck {
+    private fun checkBootloader(): PolicyCheck {
         val locked = systemProperty("ro.boot.flash.locked")
         val vbmeta = systemProperty("ro.boot.vbmeta.device_state")
         val passed = locked == "1" || vbmeta.equals("locked", ignoreCase = true)
         val known = locked.isNotBlank() || vbmeta.isNotBlank()
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Bootloader locked",
             passed = if (known) passed else true,
             blocking = known,
@@ -209,16 +207,18 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkRootHints(): DeviceCheck {
+    private fun checkRootHints(): PolicyCheck {
         val suPaths = listOf(
             "/system/bin/su",
             "/system/xbin/su",
             "/sbin/su",
             "/data/local/xbin/su",
+            "/system/bin/magisk",
+            "/sbin/magisk",
         ).filter { File(it).exists() }
         val magisk = isInstalled("com.topjohnwu.magisk")
         val rooted = suPaths.isNotEmpty() || magisk
-        return DeviceCheck(
+        return PolicyCheck(
             name = "No obvious root",
             passed = !rooted,
             blocking = true,
@@ -230,14 +230,12 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkSecurityPatch(): DeviceCheck {
+    private fun checkSecurityPatch(): PolicyCheck {
         val patch = Build.VERSION.SECURITY_PATCH
-        val parsed = runCatching {
-            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(patch)
-        }.getOrNull()
-        val ageDays = parsed?.let { TimeUnit.MILLISECONDS.toDays(Date().time - it.time) }
-        val passed = ageDays != null && ageDays <= PATCH_BLOCKING_DAYS
-        return DeviceCheck(
+        val now = System.currentTimeMillis()
+        val ageDays = SecurityPatchAge.ageDays(patch, now)
+        val passed = SecurityPatchAge.isFresh(patch, now, PATCH_BLOCKING_DAYS)
+        return PolicyCheck(
             name = "Security patch age",
             passed = passed,
             blocking = true,
@@ -245,9 +243,9 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkStrongBox(): DeviceCheck {
+    private fun checkStrongBox(): PolicyCheck {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            return DeviceCheck(
+            return PolicyCheck(
                 name = "StrongBox (optional)",
                 passed = false,
                 blocking = false,
@@ -265,7 +263,7 @@ class BankingReadinessLab(private val context: Context) {
         } else {
             false
         }
-        return DeviceCheck(
+        return PolicyCheck(
             name = "StrongBox (optional)",
             passed = created,
             blocking = false,
@@ -273,7 +271,7 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkStrongBiometric(): DeviceCheck {
+    private fun checkStrongBiometric(): PolicyCheck {
         val status = BiometricManager.from(context)
             .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
         val passed = status == BiometricManager.BIOMETRIC_SUCCESS
@@ -284,7 +282,7 @@ class BankingReadinessLab(private val context: Context) {
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "NONE_ENROLLED"
             else -> "code $status"
         }
-        return DeviceCheck(
+        return PolicyCheck(
             name = "Class 3 biometric enrolled (optional)",
             passed = passed,
             blocking = false,
@@ -292,9 +290,9 @@ class BankingReadinessLab(private val context: Context) {
         )
     }
 
-    private fun checkAdb(): DeviceCheck {
+    private fun checkAdb(): PolicyCheck {
         val adb = Settings.Global.getInt(context.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
-        return DeviceCheck(
+        return PolicyCheck(
             name = "USB debugging off (optional)",
             passed = !adb,
             blocking = false,
@@ -308,7 +306,15 @@ class BankingReadinessLab(private val context: Context) {
 
     private fun isInstalled(packageName: String): Boolean {
         return runCatching {
-            context.packageManager.getPackageInfo(packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(0),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(packageName, 0)
+            }
             true
         }.getOrDefault(false)
     }

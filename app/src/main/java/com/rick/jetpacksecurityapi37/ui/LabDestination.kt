@@ -20,15 +20,50 @@ enum class LabDestination(
         "Crypto migration",
         "Copy a legacy EncryptedSharedPreferences value into Tink+DataStore",
     ),
-    KEYSTORE(
-        "keystore",
-        "Android Keystore",
-        "Hardware-backed keys and StrongBox",
+    BACKUP(
+        "backup",
+        "Backup exclusion",
+        "Why encrypted files must stay out of Auto Backup",
     ),
     AUTHENTICATOR(
         "authenticator",
         "App Authenticator",
         "Verify another app by package name + cert digest",
+    ),
+    KEYSTORE(
+        "keystore",
+        "Android Keystore",
+        "Hardware-backed keys and StrongBox",
+    ),
+    BIOMETRIC(
+        "biometric",
+        "Biometric-gated key",
+        "Keystore key that requires BIOMETRIC_STRONG",
+    ),
+    BANKING(
+        "banking",
+        "Banking app readiness",
+        "Device signals banks use to allow install and login",
+    ),
+    SCREEN_CAPTURE(
+        "screen-capture",
+        "Screenshot / FLAG_SECURE",
+        "Block screenshots on login-style screens",
+    ),
+    OVERLAY(
+        "overlay",
+        "Overlay / tapjacking",
+        "Drop obscured touches and hide overlay windows",
+    ),
+    INSTALL_SOURCE(
+        "install-source",
+        "Installer source",
+        "Play Store vs sideload vs debug install",
+    ),
+    PAYMENT(
+        "payment",
+        "Contactless payment (NFC)",
+        "NFC + HCE + lock screen floor for tap-to-pay",
     ),
     IDENTITY(
         "identity",
@@ -40,24 +75,14 @@ enum class LabDestination(
         "Security State",
         "Live SPL bundle plus a scripted OEM update sample",
     ),
-    BIOMETRIC(
-        "biometric",
-        "Biometric-gated key",
-        "Keystore key that requires BIOMETRIC_STRONG",
-    ),
     CREDENTIALS(
         "credentials",
         "Credential Manager",
         "Platform neighbor for passwords and passkeys",
     ),
-    BANKING(
-        "banking",
-        "Banking app readiness",
-        "Device signals banks use to allow install and login",
-    ),
-    BACKUP(
-        "backup",
-        "Backup exclusion",
-        "Why encrypted files must stay out of Auto Backup",
-    ),
+    ;
+
+    companion object {
+        const val CATALOG_ROUTE = "catalog"
+    }
 }

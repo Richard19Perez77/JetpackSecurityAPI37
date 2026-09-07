@@ -5,7 +5,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -22,14 +21,14 @@ class KeystoreBlobStore(context: Context) : EncryptedBlobStore {
     override suspend fun write(fileName: String, plaintext: String) = withContext(Dispatchers.IO) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, aesKey())
+        cipher.updateAAD(fileName.toByteArray(StandardCharsets.UTF_8))
         val ciphertext = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
-        val file = fileFor(fileName)
-        file.parentFile?.mkdirs()
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         file.writeBytes(cipher.iv + ciphertext)
     }
 
     override suspend fun read(fileName: String): String? = withContext(Dispatchers.IO) {
-        val file = fileFor(fileName)
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         if (!file.exists()) return@withContext null
         val packed = file.readBytes()
         require(packed.size > IV_SIZE) { "Ciphertext too short" }
@@ -37,12 +36,8 @@ class KeystoreBlobStore(context: Context) : EncryptedBlobStore {
         val ciphertext = packed.copyOfRange(IV_SIZE, packed.size)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(TAG_BITS, iv))
+        cipher.updateAAD(fileName.toByteArray(StandardCharsets.UTF_8))
         String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
-    }
-
-    private fun fileFor(fileName: String): File {
-        val dir = File(appContext.filesDir, DIR).apply { mkdirs() }
-        return File(dir, fileName)
     }
 
     private fun aesKey(): SecretKey {

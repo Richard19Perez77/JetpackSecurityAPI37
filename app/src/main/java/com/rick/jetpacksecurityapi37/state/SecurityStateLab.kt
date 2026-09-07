@@ -5,11 +5,9 @@ import android.os.Build
 import androidx.security.state.SecurityStateManagerCompat
 
 /**
- *
- *  Gets Global Security State of App
- *      Prints out bundle of device values
- *
- * @property context - Context
+ * Reads the live [SecurityStateManagerCompat] bundle and prints a scripted OEM
+ * [MockUpdateInfo] sample so reviewers can see the UpdateInfo shape without a
+ * privileged provider.
  */
 class SecurityStateLab(private val context: Context) {
 

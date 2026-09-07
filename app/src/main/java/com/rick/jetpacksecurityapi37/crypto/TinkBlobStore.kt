@@ -8,7 +8,6 @@ import com.google.crypto.tink.integration.android.AndroidKeysetManager
 import com.google.crypto.tink.streamingaead.StreamingAeadConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.nio.charset.StandardCharsets
 
 class TinkBlobStore(context: Context) : EncryptedBlobStore {
@@ -16,42 +15,39 @@ class TinkBlobStore(context: Context) : EncryptedBlobStore {
     override val era = CryptoEra.TINK_DATASTORE
 
     private val appContext = context.applicationContext
-    private val streamingAead: StreamingAead
-
-    init {
-        StreamingAeadConfig.register()
-        streamingAead = AndroidKeysetManager.Builder()
-            .withSharedPref(appContext, KEYSET_NAME, KEYSET_PREFS)
-            .withKeyTemplate(KeyTemplates.get("AES256_GCM_HKDF_4KB"))
-            .withMasterKeyUri(MASTER_KEY_URI)
-            .build()
-            .keysetHandle
-            .getPrimitive(RegistryConfiguration.get(), StreamingAead::class.java)
-    }
+    private val streamingAead: StreamingAead by lazy { createStreamingAead() }
 
     override suspend fun write(fileName: String, plaintext: String) = withContext(Dispatchers.IO) {
-        val file = fileFor(fileName)
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         if (file.exists()) file.delete()
+        val associatedData = fileName.toByteArray(StandardCharsets.UTF_8)
         file.outputStream().use { fileOut ->
-            streamingAead.newEncryptingStream(fileOut, fileName.toByteArray()).use { encrypting ->
+            streamingAead.newEncryptingStream(fileOut, associatedData).use { encrypting ->
                 encrypting.write(plaintext.toByteArray(StandardCharsets.UTF_8))
             }
         }
     }
 
     override suspend fun read(fileName: String): String? = withContext(Dispatchers.IO) {
-        val file = fileFor(fileName)
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         if (!file.exists()) return@withContext null
+        val associatedData = fileName.toByteArray(StandardCharsets.UTF_8)
         file.inputStream().use { fileIn ->
-            streamingAead.newDecryptingStream(fileIn, fileName.toByteArray()).use { decrypting ->
+            streamingAead.newDecryptingStream(fileIn, associatedData).use { decrypting ->
                 String(decrypting.readBytes(), StandardCharsets.UTF_8)
             }
         }
     }
 
-    private fun fileFor(fileName: String): File {
-        val dir = File(appContext.filesDir, DIR).apply { mkdirs() }
-        return File(dir, fileName)
+    private fun createStreamingAead(): StreamingAead {
+        StreamingAeadConfig.register()
+        return AndroidKeysetManager.Builder()
+            .withSharedPref(appContext, KEYSET_NAME, KEYSET_PREFS)
+            .withKeyTemplate(KeyTemplates.get("AES256_GCM_HKDF_4KB"))
+            .withMasterKeyUri(MASTER_KEY_URI)
+            .build()
+            .keysetHandle
+            .getPrimitive(RegistryConfiguration.get(), StreamingAead::class.java)
     }
 
     companion object {

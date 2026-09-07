@@ -27,7 +27,7 @@ class BackupLab(private val context: Context) {
             "file ${LegacyBlobStore.DIR}/",
             "file ${TinkBlobStore.DIR}/",
             "file ${KeystoreBlobStore.DIR}/",
-            "file datastore/${TinkSecretStore.DATASTORE_NAME}.preferences_pb",
+            "file datastore/ (entire directory, including ${TinkSecretStore.DATASTORE_NAME}.preferences_pb)",
         ).forEach { appendLine("- $it") }
     }
 }

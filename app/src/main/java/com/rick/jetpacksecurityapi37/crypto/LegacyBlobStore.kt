@@ -22,7 +22,7 @@ class LegacyBlobStore(context: Context) : EncryptedBlobStore {
     }
 
     override suspend fun write(fileName: String, plaintext: String) = withContext(Dispatchers.IO) {
-        val file = fileFor(fileName)
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         if (file.exists()) file.delete()
         encrypted(file).openFileOutput().use { output ->
             output.write(plaintext.toByteArray(StandardCharsets.UTF_8))
@@ -30,16 +30,11 @@ class LegacyBlobStore(context: Context) : EncryptedBlobStore {
     }
 
     override suspend fun read(fileName: String): String? = withContext(Dispatchers.IO) {
-        val file = fileFor(fileName)
+        val file = EncryptedPaths.fileInDir(appContext.filesDir, DIR, fileName)
         if (!file.exists()) return@withContext null
         encrypted(file).openFileInput().use { input ->
             String(input.readBytes(), StandardCharsets.UTF_8)
         }
-    }
-
-    private fun fileFor(fileName: String): File {
-        val dir = File(appContext.filesDir, DIR).apply { mkdirs() }
-        return File(dir, fileName)
     }
 
     private fun encrypted(file: File): EncryptedFile = EncryptedFile.Builder(

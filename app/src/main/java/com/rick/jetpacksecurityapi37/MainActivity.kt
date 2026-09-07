@@ -23,12 +23,16 @@ import com.rick.jetpacksecurityapi37.ui.labs.AuthenticatorLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.BackupLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.BankingLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.BiometricLabScreen
+import com.rick.jetpacksecurityapi37.ui.labs.ContactlessPaymentLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.CredentialManagerLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.EncryptedFilesLab
 import com.rick.jetpacksecurityapi37.ui.labs.EncryptedPreferencesLab
 import com.rick.jetpacksecurityapi37.ui.labs.IdentityLabScreen
+import com.rick.jetpacksecurityapi37.ui.labs.InstallSourceLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.KeystoreLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.MigrationLabScreen
+import com.rick.jetpacksecurityapi37.ui.labs.OverlayTapjackingLabScreen
+import com.rick.jetpacksecurityapi37.ui.labs.ScreenCaptureLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.SecurityStateLabScreen
 import com.rick.jetpacksecurityapi37.ui.theme.JetpackSecurityAPI37Theme
 
@@ -60,10 +64,10 @@ class MainActivity : FragmentActivity() {
                 ) { innerPadding ->
                     NavHost(
                         navController = navController,
-                        startDestination = "catalog",
+                        startDestination = LabDestination.CATALOG_ROUTE,
                         modifier = Modifier.padding(innerPadding),
                     ) {
-                        composable("catalog") {
+                        composable(LabDestination.CATALOG_ROUTE) {
                             CatalogScreen { dest -> navController.navigate(dest.route) }
                         }
                         composable(LabDestination.STORAGE.route) { EncryptedPreferencesLab() }
@@ -76,6 +80,10 @@ class MainActivity : FragmentActivity() {
                         composable(LabDestination.BIOMETRIC.route) { BiometricLabScreen() }
                         composable(LabDestination.CREDENTIALS.route) { CredentialManagerLabScreen() }
                         composable(LabDestination.BANKING.route) { BankingLabScreen() }
+                        composable(LabDestination.SCREEN_CAPTURE.route) { ScreenCaptureLabScreen() }
+                        composable(LabDestination.OVERLAY.route) { OverlayTapjackingLabScreen() }
+                        composable(LabDestination.INSTALL_SOURCE.route) { InstallSourceLabScreen() }
+                        composable(LabDestination.PAYMENT.route) { ContactlessPaymentLabScreen() }
                         composable(LabDestination.BACKUP.route) { BackupLabScreen() }
                     }
                 }

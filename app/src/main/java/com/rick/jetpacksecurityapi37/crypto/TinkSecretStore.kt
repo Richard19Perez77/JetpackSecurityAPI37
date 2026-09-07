@@ -12,7 +12,9 @@ import com.google.crypto.tink.KeyTemplates
 import com.google.crypto.tink.RegistryConfiguration
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.nio.charset.StandardCharsets
 
 private val Context.tinkSecretDataStore: DataStore<Preferences> by preferencesDataStore(
@@ -24,20 +26,9 @@ class TinkSecretStore(context: Context) : SecretStore {
     override val era = CryptoEra.TINK_DATASTORE
 
     private val appContext = context.applicationContext
-    private val aead: Aead
+    private val aead: Aead by lazy { createAead() }
 
-    init {
-        AeadConfig.register()
-        aead = AndroidKeysetManager.Builder()
-            .withSharedPref(appContext, KEYSET_NAME, KEYSET_PREFS)
-            .withKeyTemplate(KeyTemplates.get("AES256_GCM"))
-            .withMasterKeyUri(MASTER_KEY_URI)
-            .build()
-            .keysetHandle
-            .getPrimitive(RegistryConfiguration.get(), Aead::class.java)
-    }
-
-    override suspend fun save(key: String, value: String) {
+    override suspend fun save(key: String, value: String) = withContext(Dispatchers.IO) {
         val ciphertext = aead.encrypt(
             value.toByteArray(StandardCharsets.UTF_8),
             key.toByteArray(StandardCharsets.UTF_8),
@@ -46,17 +37,29 @@ class TinkSecretStore(context: Context) : SecretStore {
         appContext.tinkSecretDataStore.edit { prefs ->
             prefs[stringPreferencesKey(key)] = encoded
         }
+        Unit
     }
 
-    override suspend fun read(key: String): String? {
+    override suspend fun read(key: String): String? = withContext(Dispatchers.IO) {
         val encoded = appContext.tinkSecretDataStore.data.first()[stringPreferencesKey(key)]
-            ?: return null
+            ?: return@withContext null
         val ciphertext = Base64.decode(encoded, Base64.NO_WRAP)
         val plaintext = aead.decrypt(
             ciphertext,
             key.toByteArray(StandardCharsets.UTF_8),
         )
-        return String(plaintext, StandardCharsets.UTF_8)
+        String(plaintext, StandardCharsets.UTF_8)
+    }
+
+    private fun createAead(): Aead {
+        AeadConfig.register()
+        return AndroidKeysetManager.Builder()
+            .withSharedPref(appContext, KEYSET_NAME, KEYSET_PREFS)
+            .withKeyTemplate(KeyTemplates.get("AES256_GCM"))
+            .withMasterKeyUri(MASTER_KEY_URI)
+            .build()
+            .keysetHandle
+            .getPrimitive(RegistryConfiguration.get(), Aead::class.java)
     }
 
     companion object {

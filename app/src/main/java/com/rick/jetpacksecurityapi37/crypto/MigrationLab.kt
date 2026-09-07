@@ -16,8 +16,12 @@ class MigrationLab(private val context: Context) {
         val value = legacy.read(SAMPLE_KEY)
             ?: return "Nothing to migrate. Seed the legacy store first."
         current.save(SAMPLE_KEY, value)
+        val verified = current.read(SAMPLE_KEY)
+        if (verified != value) {
+            return "Wrote Tink copy but read-back did not match. Left ${LegacySecretStore.PREFS_NAME} in place."
+        }
         context.deleteSharedPreferences(LegacySecretStore.PREFS_NAME)
-        return "Copied $SAMPLE_KEY into Tink+DataStore and deleted ${LegacySecretStore.PREFS_NAME}."
+        return "Copied $SAMPLE_KEY into Tink+DataStore, verified the new read, and deleted ${LegacySecretStore.PREFS_NAME}."
     }
 
     suspend fun status(): String {
