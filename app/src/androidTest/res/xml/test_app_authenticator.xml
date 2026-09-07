@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<app-authenticator>
+    <expected-identity>
+        <package name="com.rick.jetpacksecurityapi37">
+            <cert-digest>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</cert-digest>
+        </package>
+    </expected-identity>
+</app-authenticator>

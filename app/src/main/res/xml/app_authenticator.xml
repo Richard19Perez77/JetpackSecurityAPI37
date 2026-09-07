@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<app-authenticator>
+    <expected-identity>
+        <package name="com.rick.jetpacksecurityapi37">
+            <cert-digest>0000000000000000000000000000000000000000000000000000000000000000</cert-digest>
+        </package>
+        <package name="com.android.vending">
+            <cert-digest>f0fd6c5b410f25cb25c3b53346c8972fae30f8ee7411df910480ad6b2d60db83</cert-digest>
+        </package>
+    </expected-identity>
+    <permission name="com.rick.jetpacksecurityapi37.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION">
+        <package name="com.rick.jetpacksecurityapi37">
+            <cert-digest>0000000000000000000000000000000000000000000000000000000000000000</cert-digest>
+        </package>
+    </permission>
+</app-authenticator>

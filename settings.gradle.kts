@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "JetpackSecurityAPI37"
 include(":app")
+include(":authenticator-testing")

@@ -1,19 +1,23 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
--->
+<?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="jetsec_legacy_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_tink_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_tink_stream_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_keystore_prefs.xml" />
+        <exclude domain="file" path="jetsec_legacy_files/" />
+        <exclude domain="file" path="jetsec_tink_files/" />
+        <exclude domain="file" path="jetsec_keystore_files/" />
+        <exclude domain="file" path="datastore/" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="jetsec_legacy_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_tink_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_tink_stream_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="jetsec_keystore_prefs.xml" />
+        <exclude domain="file" path="jetsec_legacy_files/" />
+        <exclude domain="file" path="jetsec_tink_files/" />
+        <exclude domain="file" path="jetsec_keystore_files/" />
+        <exclude domain="file" path="datastore/" />
     </device-transfer>
-    -->
 </data-extraction-rules>

@@ -1,13 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
+<?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="jetsec_legacy_prefs.xml" />
+    <exclude domain="sharedpref" path="jetsec_tink_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="jetsec_tink_stream_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="jetsec_keystore_prefs.xml" />
+    <exclude domain="file" path="jetsec_legacy_files/" />
+    <exclude domain="file" path="jetsec_tink_files/" />
+    <exclude domain="file" path="jetsec_keystore_files/" />
+    <exclude domain="file" path="datastore/" />
 </full-backup-content>
