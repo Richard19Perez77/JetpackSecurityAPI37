@@ -1289,3 +1289,841 @@ For most apps, it's better to **remove this check** and instead:
 - Don't block payment functionality if your app isn't default (Android 10+ foreground payments work anyway)
 
 The cleanest approach: **Keep it as an informative (non-blocking) check that shows the current default, but don't make decisions based on it.**
+
+---
+
+## Initial Security Review of `AppAuthenticatorLab`
+
+This is a **well-crafted diagnostic/testing class** for Android's App Authenticator API. Let me give you my high-level assessment before diving into each method.
+
+---
+
+### 🎯 What This Class Does
+
+It **verifies app identity** by comparing the app's actual signing certificate against expected certificates defined in XML. This is critical for:
+- **Secure communication** between your apps
+- **Preventing impersonation** by malicious apps
+- **Verifying app integrity** at runtime
+
+---
+
+### 🟢 Strengths
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| **Purpose** | ✅ Clear | Diagnostic tool for App Authenticator |
+| **API Usage** | ✅ Correct | Proper use of AndroidX security API |
+| **Error Handling** | ✅ Good | Catches and reports exceptions gracefully |
+| **Version Handling** | ✅ Good | Handles pre-Android P signature retrieval |
+| **Documentation** | ✅ Excellent | Clear comments and user-friendly output |
+| **Testing Support** | ✅ Great | Generates runtime XML for testing |
+
+---
+
+### 🟡 Concerns & Improvements
+
+#### 1. **DEBUG-ONLY Code** (Critical)
+```kotlin
+// ⚠️ This class exposes sensitive certificate information!
+fun inspect(): String = buildString {
+    // This outputs the actual signing certificate SHA-256
+    appendLine(digest ?: "(unavailable)")
+    // This could leak sensitive info if used in production
+}
+```
+
+**Risk**: If this class is included in production builds, it exposes:
+- Your app's signing certificate hash
+- Package name
+- Internal security checks
+
+**Fix**:
+```kotlin
+// Add debug-only protection
+class AppAuthenticatorLab(private val context: Context) {
+    
+    init {
+        // Prevent usage in production
+        if (!BuildConfig.DEBUG) {
+            throw IllegalStateException("AppAuthenticatorLab should not be used in production!")
+        }
+    }
+    
+    // Or better: Use @Debug annotation
+    // @DebugOnly
+    fun inspect(): String = buildString { ... }
+}
+```
+
+#### 2. **Missing ProGuard/R8 Rules**
+The class uses reflection and dynamic XML generation - this may break with minification.
+
+**Add ProGuard rules:**
+```proguard
+# Keep the AppAuthenticatorLab class for debug builds only
+-keep class com.rick.jetpacksecurityapi37.authenticator.AppAuthenticatorLab {
+    *;
+}
+
+# Keep XML resources used by AppAuthenticator
+-keep public class androidx.security.app.authenticator.** { *; }
+-keepclassmembers class * extends androidx.security.app.authenticator.AppAuthenticator { *; }
+```
+
+#### 3. **Static XML Placeholder Issue**
+```kotlin
+// The comment mentions placeholder digest
+appendLine("Static XML (${context.resources.getResourceEntryName(R.xml.app_authenticator)}) uses a placeholder digest, so a production-style check of this debug build usually returns NO_MATCH.")
+```
+
+**This is a HUGE problem** if the placeholder XML is included in production!
+
+**Production XML must have the real certificate:**
+```xml
+<!-- res/xml/app_authenticator.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<app-authenticator>
+    <expected-identity>
+        <package name="com.rick.jetpacksecurityapi37">
+            <!-- REPLACE WITH YOUR REAL CERTIFICATE HASH -->
+            <cert-digest>a1b2c3d4e5f6...</cert-digest>
+        </package>
+    </expected-identity>
+</app-authenticator>
+```
+
+#### 4. **No Certificate Expiry/Rotation Handling**
+The class doesn't handle certificate rotation scenarios (when you update your app with a new signing key).
+
+---
+
+### 📊 Security Context
+
+This class fits into a broader security architecture:
+
+```
+[Your App] 
+    ↓
+[AppAuthenticatorLab] ← (Debug/Diagnostic)
+    ↓
+[AppAuthenticator API]
+    ↓
+[Android OS] ← Verifies signatures at system level
+```
+
+---
+
+### 🎯 Overall Assessment
+
+| Aspect | Score | Comments |
+|--------|-------|----------|
+| **Code Quality** | 9/10 | Clean, well-structured, good error handling |
+| **Security** | 7/10 | Good concept but production concerns |
+| **Production Readiness** | 4/10 | Leaks sensitive info, debug-only code |
+| **Testing Utility** | 10/10 | Excellent for testing Auth flows |
+| **Documentation** | 8/10 | Clear, but could add more security context |
+
+---
+
+### 🚨 Critical Questions to Answer
+
+1. **Is this class included in production builds?**
+    - If YES → **Security risk** (leaks certificate hash)
+    - If NO → Good, but ensure proper build variants
+
+2. **What's in `R.xml.app_authenticator`?**
+    - Does it contain the REAL certificate for production?
+    - Or just a placeholder for testing?
+
+3. **What's the intended use case?**
+    - Testing/debugging? → ✅ Good
+    - Production security check? → ❌ Need to fix certificate handling
+
+---
+
+### ✅ Recommended Actions
+
+```kotlin
+// 1. Add BuildConfig check
+class AppAuthenticatorLab(private val context: Context) {
+    init {
+        if (!BuildConfig.DEBUG) {
+            throw SecurityException("AppAuthenticatorLab is debug-only")
+        }
+    }
+}
+
+// 2. Add @RequiresPermission if needed
+@RequiresPermission(android.Manifest.permission.GET_PACKAGE_SIZE)
+fun inspect(): String = buildString { ... }
+
+// 3. Consider using @VisibleForTesting
+@VisibleForTesting(otherwise = VisibleForTesting.NONE)
+class AppAuthenticatorLab { ... }
+```
+
+---
+
+### 🔍 Deep Dive Points
+
+For the detailed review, I'll examine:
+
+1. **`signingCertSha256Hex()`** - Version handling, security, fallbacks
+2. **`checkAgainstStaticXml()`** - Resource loading, error handling
+3. **`checkAgainstGeneratedXml()`** - Dynamic XML generation risks
+4. **`inspect()`** - Information exposure, logging concerns
+5. **Overall architecture** - How this fits with Android's security model
+
+---
+
+### 🏆 Summary
+
+**This is an excellent diagnostic tool** with a few critical issues:
+
+✅ **Great for**:
+- Testing App Authenticator integration
+- Debugging certificate issues
+- Understanding authentication flow
+
+⚠️ **Needs fixing**:
+- Prevent production use
+- Handle real certificates properly
+- Add security annotations
+
+❌ **Critical missing**:
+- Production security enforcement
+- Certificate rotation handling
+- Protection against leaking sensitive info
+
+**Bottom line**: The code is well-written but **should be debug-only**. With some modifications, it would be production-ready. The core AppAuthenticator API usage is correct and secure. 🎯
+
+---
+
+Ready for the method-by-method review? I'll break down each function in detail! 🔍
+
+---
+
+## Deep Dive: `checkAgainstStaticXml()` Method
+
+This method is the **production-like security check** that validates your app's identity against a **statically defined XML resource**. Let me break down every aspect.
+
+---
+
+### 🎯 What This Method Does
+
+1. **Loads an XML resource** (`R.xml.app_authenticator`) that contains expected app identity
+2. **Creates an `AppAuthenticator`** instance from that XML
+3. **Checks the current app's identity** against the expectations
+4. **Returns a human-readable result**
+
+---
+
+### 🔍 Step-by-Step Breakdown
+
+#### Step 1: Loading the XML Resource
+```kotlin
+AppAuthenticator.createFromResource(context, R.xml.app_authenticator)
+```
+
+**What happens here:**
+- Reads `res/xml/app_authenticator.xml` from your app's resources
+- Parses the XML into an `AppAuthenticator` configuration
+- The XML defines **what your app SHOULD look like** (expected identity)
+
+**Expected XML format:**
+```xml
+<!-- res/xml/app_authenticator.xml -->
+<?xml version="1.0" encoding="utf-8"?>
+<app-authenticator>
+    <expected-identity>
+        <!-- The package name of YOUR app -->
+        <package name="com.rick.jetpacksecurityapi37">
+            <!-- The SHA-256 certificate digest (must match!) -->
+            <cert-digest>a1b2c3d4e5f67890...</cert-digest>
+        </package>
+    </expected-identity>
+</app-authenticator>
+```
+
+#### Step 2: Verifying Identity
+```kotlin
+authenticator.checkAppIdentity(context.packageName)
+```
+
+**What happens here:**
+1. **Gets the actual app signing certificate** from the Android system
+2. **Computes its SHA-256 hash**
+3. **Compares it** with the hash in the XML
+4. **Returns a result code**:
+    - `AppAuthenticator.SIGNATURE_MATCH` → ✅ The app is authentic
+    - `AppAuthenticator.SIGNATURE_NO_MATCH` → ❌ The app is fake/compromised
+
+#### Step 3: Formatting the Result
+```kotlin
+"Static XML checkAppIdentity: ${label(result)}"
+// Output: "Static XML checkAppIdentity: SIGNATURE_MATCH" or "SIGNATURE_NO_MATCH"
+```
+
+---
+
+### 🏗️ How This Secures Your App
+
+#### The Attack Scenario (Without This Check)
+
+```kotlin
+// ❌ UNSAFE: A malicious app could impersonate you
+class MaliciousApp {
+    fun stealUserData() {
+        // Pretends to be your app!
+        val intent = Intent("com.your.app.ACTION_GET_USER_DATA")
+        startActivity(intent)
+        // Intercepts the data because it has the same package name? 
+        // No, but it could TRY to access your content providers!
+    }
+}
+```
+
+#### The Defense (With This Check)
+
+```kotlin
+// ✅ SAFE: Your app verifies who's calling
+class YourSecureService {
+    fun handleSensitiveRequest(callingPackage: String) {
+        val authenticator = AppAuthenticator.createFromResource(context, R.xml.app_authenticator)
+        
+        // Verify the calling app is actually YOU
+        val result = authenticator.checkAppIdentity(callingPackage)
+        
+        if (result != AppAuthenticator.SIGNATURE_MATCH) {
+            // This is a malicious app impersonating you!
+            throw SecurityException("Unauthorized caller")
+        }
+        
+        // Only reachable if the caller is the real YOU
+        grantAccess()
+    }
+}
+```
+
+---
+
+### 📊 Comparison: Static vs Dynamic XML
+
+| Aspect | Static XML | Dynamic XML (Your Other Method) |
+|--------|------------|--------------------------------|
+| **Purpose** | Production security | Testing/debugging |
+| **XML Source** | Resources (`res/xml/`) | Generated at runtime |
+| **Certificate** | Fixed at build time | Can be varied |
+| **Security** | ✅ High | ⚠️ Low (test only) |
+| **Performance** | ✅ Fast (pre-compiled) | ⚠️ Slower (parses string) |
+| **Use Case** | Production verification | Testing certificate changes |
+
+---
+
+### ⚠️ Potential Issues & Improvements
+
+#### Issue 1: **Catching ALL Throwables**
+```kotlin
+catch (t: Throwable) {  // ❌ Catching everything!
+    "Static XML check failed: ${t.javaClass.simpleName}: ${t.message}"
+}
+```
+
+**Problems:**
+- Catches `OutOfMemoryError`, `StackOverflowError` (should crash)
+- Hides critical system errors
+- Makes debugging harder
+
+**Fix:**
+```kotlin
+catch (e: Exception) {  // ✅ Only catch expected exceptions
+    return "Static XML check failed: ${e.javaClass.simpleName}: ${e.message}"
+}
+```
+
+#### Issue 2: **No Resource Validation**
+```kotlin
+// ❌ Could fail silently if XML is malformed
+val authenticator = AppAuthenticator.createFromResource(context, R.xml.app_authenticator)
+```
+
+**Fix:**
+```kotlin
+private fun checkAgainstStaticXml(): String {
+    return try {
+        // Validate resource exists
+        val xmlResourceId = R.xml.app_authenticator
+        val parser = context.resources.getXml(xmlResourceId)
+        if (parser == null) {
+            return "Static XML check failed: Resource not found"
+        }
+        
+        val authenticator = AppAuthenticator.createFromResource(context, xmlResourceId)
+        val result = authenticator.checkAppIdentity(context.packageName)
+        
+        "Static XML checkAppIdentity: ${label(result)}"
+    } catch (e: Exception) {
+        "Static XML check failed: ${e.javaClass.simpleName}: ${e.message}"
+    }
+}
+```
+
+#### Issue 3: **Missing Security Context**
+```kotlin
+// There's no indication of WHAT this check is used for
+// Is it for:
+// - Protecting a content provider?
+// - Verifying a service caller?
+// - Authorizing an API call?
+```
+
+**Better:**
+```kotlin
+/**
+ * Verifies the current app's identity against the static XML configuration.
+ * 
+ * This is the PRODUCTION security check used to:
+ * - Protect ContentProviders from unauthorized access
+ * - Verify callers in bound services
+ * - Authenticate inter-app communication
+ * 
+ * Expected XML: res/xml/app_authenticator.xml with the production certificate hash
+ * 
+ * @return Human-readable verification result
+ * @throws SecurityException if identity cannot be verified
+ */
+private fun checkAgainstStaticXml(): String { ... }
+```
+
+#### Issue 4: **No Certificate Expiry Handling**
+```kotlin
+// The XML has a fixed certificate, but what if:
+// - You rotate your signing key?
+// - You have multiple signing keys (e.g., Play Store vs. enterprise)?
+// - You need to support different environments?
+```
+
+**Better approach:**
+```xml
+<!-- Support multiple certificates -->
+<app-authenticator>
+    <expected-identity>
+        <package name="com.rick.jetpacksecurityapi37">
+            <!-- Development certificate -->
+            <cert-digest>dev_sha256_hash</cert-digest>
+        </package>
+        <package name="com.rick.jetpacksecurityapi37">
+            <!-- Production certificate -->
+            <cert-digest>prod_sha256_hash</cert-digest>
+        </package>
+        <!-- Play Store certificate (if different) -->
+        <package name="com.rick.jetpacksecurityapi37">
+            <cert-digest>playstore_sha256_hash</cert-digest>
+        </package>
+    </expected-identity>
+</app-authenticator>
+```
+
+---
+
+### 🔐 Real-World Usage Example
+
+#### Protecting a ContentProvider
+
+```kotlin
+class SecureContentProvider : ContentProvider() {
+    
+    private lateinit var authenticator: AppAuthenticator
+    
+    override fun onCreate(): Boolean {
+        // Load once for performance
+        authenticator = AppAuthenticator.createFromResource(context, R.xml.app_authenticator)
+        return true
+    }
+    
+    override fun query(uri: Uri, projection: Array<String>?, selection: String?,
+                       selectionArgs: Array<String>?, sortOrder: String?): Cursor? {
+        
+        // 🔒 SECURITY CHECK
+        val callingPackage = context.packageManager.getNameForUid(Binder.getCallingUid())
+        if (authenticator.checkAppIdentity(callingPackage) != AppAuthenticator.SIGNATURE_MATCH) {
+            // Someone else is trying to access our data!
+            Log.w("SecureProvider", "Unauthorized access attempt from: $callingPackage")
+            return null
+        }
+        
+        // Only the real app can access this data
+        return getSecureData()
+    }
+}
+```
+
+#### Verifying a Service Caller
+
+```kotlin
+class SecureService : Service() {
+    
+    override fun onBind(intent: Intent): IBinder {
+        // Verify the caller is our app
+        val callingPackage = intent.getStringExtra("calling_package") ?: return null
+        
+        if (authenticator.checkAppIdentity(callingPackage) != AppAuthenticator.SIGNATURE_MATCH) {
+            Log.w("SecureService", "Rejected call from: $callingPackage")
+            return null
+        }
+        
+        return binder
+    }
+}
+```
+
+---
+
+### 📊 Method Performance
+
+| Operation | Cost | Notes |
+|-----------|------|-------|
+| **XML parsing** | Low | Cached after first load |
+| **Certificate retrieval** | Medium | System call |
+| **Hash comparison** | Low | Simple string comparison |
+| **Overall** | Medium | Fine for occasional checks |
+
+**Optimization tip:** Cache the `AppAuthenticator` instance:
+```kotlin
+class AppAuthenticatorLab(context: Context) {
+    private val authenticator by lazy {
+        AppAuthenticator.createFromResource(context, R.xml.app_authenticator)
+    }
+    
+    fun checkAgainstStaticXml(): String {
+        val result = authenticator.checkAppIdentity(context.packageName)
+        return "Static XML checkAppIdentity: ${label(result)}"
+    }
+}
+```
+
+---
+
+### 🎯 Summary
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| **Security** | ✅ Good | Proper API usage |
+| **Error Handling** | ⚠️ Fair | Catches too much, hides details |
+| **Performance** | ✅ Good | Can be cached |
+| **Production Ready** | ⚠️ Needs review | Depends on actual XML |
+| **Code Quality** | ✅ Good | Clean and readable |
+
+**Key Takeaways:**
+1. **This is the PRODUCTION security check** - must use real certificate
+2. **Should be called BEFORE granting access** to sensitive operations
+3. **Cache the authenticator** for performance
+4. **Don't catch Throwable** - only catch Exception
+5. **The XML must match** your actual signing certificate
+
+**In your debug/testing context:**
+- The static XML likely uses a **placeholder** (hence comments about `NO_MATCH`)
+- This is **expected** for debug builds
+- In production, the XML **must have the real certificate**
+
+The method is correctly implemented for what it does. The only concerns are around error handling and the assumption that the static XML contains the right certificate for the current context. 🎯
+
+---
+
+## Deep Dive: `signingCertSha256Hex()` Method
+
+This is the **foundation method** that retrieves your app's cryptographic identity. Everything else in the class depends on this! Let me break it down completely.
+
+---
+
+### 🎯 What This Method Does
+
+It **extracts your app's signing certificate** and converts it to a **readable SHA-256 hash** (a 64-character hex string).
+
+**In simple terms:** It gets your app's "digital fingerprint" that uniquely identifies it.
+
+---
+
+### 🔍 Why This Matters
+
+```kotlin
+// Every Android app is signed with a certificate
+// This certificate is UNIQUE to your app
+// It's like your app's social security number
+
+// This method gets that unique identifier:
+signingCertSha256Hex() 
+// Returns: "a1b2c3d4e5f67890a1b2c3d4e5f67890..."
+```
+
+---
+
+### 📱 Android Version Handling (The Important Part)
+
+The method handles **two different Android APIs** for getting signatures:
+
+#### For Android 9+ (API 28+):
+```kotlin
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+    val info = context.packageManager.getPackageInfo(
+        context.packageName,
+        PackageManager.GET_SIGNING_CERTIFICATES,  // ⬅️ New API
+    )
+    info.signingInfo?.apkContentsSigners  // ⬅️ New way
+}
+```
+
+**Why?**
+- Android 9+ introduced **APK Signature Scheme v2 & v3**
+- Signatures can now be in multiple places (APK, APK Signature Block)
+- `GET_SIGNING_CERTIFICATES` gets the **correct** signing certificates
+
+#### For Older Android (Pre-9):
+```kotlin
+else {
+    @Suppress("DEPRECATION")
+    context.packageManager.getPackageInfo(
+        context.packageName,
+        PackageManager.GET_SIGNATURES,  // ⬅️ Old API
+    ).signatures  // ⬅️ Old way
+}
+```
+
+**Why?**
+- Older Android only supported APK Signature Scheme v1
+- `GET_SIGNATURES` was the only way to get signatures
+
+---
+
+### 🔑 Key Components Breakdown
+
+#### 1. **Getting Package Info**
+```kotlin
+val info = context.packageManager.getPackageInfo(
+    context.packageName,  // "com.rick.jetpacksecurityapi37"
+    PackageManager.GET_SIGNING_CERTIFICATES,  // Flag to include signing info
+)
+```
+
+This asks Android: "Give me information about MY app, including who signed it."
+
+#### 2. **Extracting Signers**
+```kotlin
+info.signingInfo?.apkContentsSigners
+```
+
+**What is `signingInfo`?**
+- Contains all signing certificate information
+- Handles multiple signers (if app signed with multiple certificates)
+
+**What is `apkContentsSigners`?**
+- The certificates that signed the APK contents
+- What you usually want for identity verification
+
+**Alternative (rarely used):**
+```kotlin
+info.signingInfo?.apkContentsSigners  // ✅ The app's signers
+info.signingInfo?.signingCertificateHistory  // ⚠️ Certificate rotation history
+```
+
+#### 3. **Getting the Certificate**
+```kotlin
+val cert = signatures?.firstOrNull()?.toByteArray() ?: return null
+```
+
+- `firstOrNull()` - Gets the first certificate (usually the main one)
+- `toByteArray()` - Converts to raw bytes
+- `?: return null` - If no certificate exists, return null
+
+#### 4. **Computing SHA-256 Hash**
+```kotlin
+val digest = MessageDigest.getInstance("SHA-256").digest(cert)
+```
+
+This:
+1. Creates a SHA-256 hashing algorithm
+2. Hashes the certificate bytes
+3. Returns a 32-byte array
+
+#### 5. **Converting to Hex String**
+```kotlin
+digest.joinToString("") { byte -> "%02x".format(byte) }
+```
+
+**What this does:**
+```kotlin
+// Example: Each byte becomes 2 hex characters
+byteArrayOf(0x1A, 0x2B, 0x3C)  // Bytes
+// Becomes:
+"1a2b3c"  // Hex string
+
+// Full 32-byte certificate → 64-character hex string
+// "a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890"
+```
+
+---
+
+### 📊 What Different Signatures Look Like
+
+| Build Type | Certificate | SHA-256 Hash Example |
+|------------|-------------|---------------------|
+| **Debug** | Android debug keystore | `a1b2c3d4...` (starts with `a`) |
+| **Release** | Your production keystore | `f9e8d7c6...` (different) |
+| **Google Play** | Google's signing key | `3819acbd...` (if using Play Signing) |
+| **Enterprise** | Your company's cert | `4f5e6d7c...` (your company key) |
+
+---
+
+### ⚠️ Why Multiple API Versions?
+
+#### Problem: APK Signature Scheme Evolution
+
+| Android Version | Signature Scheme | API to Use |
+|-----------------|------------------|------------|
+| **Android 7.0-** | v1 (JAR signing) | `GET_SIGNATURES` |
+| **Android 7.0+** | v1 + v2 | Both work |
+| **Android 9+** | v1 + v2 + v3 | `GET_SIGNING_CERTIFICATES` (recommended) |
+| **Android 11+** | v1 + v2 + v3 + v4 | `GET_SIGNING_CERTIFICATES` |
+
+**Why this matters:**
+```kotlin
+// ❌ WRONG: Using old API on Android 9+
+val info = packageManager.getPackageInfo(
+    packageName,
+    PackageManager.GET_SIGNATURES  // Deprecated!
+)
+// This might miss v2/v3 signatures!
+
+// ✅ CORRECT: Using new API on Android 9+
+val info = packageManager.getPackageInfo(
+    packageName,
+    PackageManager.GET_SIGNING_CERTIFICATES  // Correct!
+)
+// This gets ALL signature schemes correctly
+```
+
+---
+
+### 🔒 Security Implications
+
+#### What This Method Enables:
+
+1. **Certificate Pinning**
+```kotlin
+// Store expected certificate hash
+val expectedCert = "a1b2c3d4..."
+
+// Verify at runtime
+val actualCert = signingCertSha256Hex()
+if (actualCert != expectedCert) {
+    // App has been tampered with!
+    throw SecurityException("Invalid certificate!")
+}
+```
+
+2. **App Identity Verification**
+```kotlin
+// Compare with XML
+val certFromXml = "a1b2c3d4..."
+val actualCert = signingCertSha256Hex()
+if (actualCert == certFromXml) {
+    // ✅ App is genuine
+} else {
+    // ❌ App is fake/tampered
+}
+```
+
+3. **Secure Inter-App Communication**
+```kotlin
+// Verify calling app
+val callerCert = getCallerCertificate(callingPackage)
+if (callerCert == EXPECTED_CERT) {
+    // ✅ Trusted app
+    grantAccess()
+}
+```
+
+---
+
+### 🚨 Error Handling
+
+#### What Could Go Wrong:
+```kotlin
+try {
+    // ... get signatures ...
+} catch (t: Throwable) {
+    Log.w(TAG, "Could not compute signing digest", t)
+    return null
+}
+```
+
+**Possible errors:**
+| Error | Cause | Result |
+|-------|-------|--------|
+| `PackageManager.NameNotFoundException` | App not installed properly | Returns `null` |
+| `SecurityException` | No permission to get package info | Returns `null` |
+| `NullPointerException` | `signingInfo` is null (shouldn't happen) | Returns `null` |
+| `NoSuchAlgorithmException` | SHA-256 not available | Returns `null` |
+
+**⚠️ Warning:** Catching `Throwable` is usually bad, but here it's somewhat justified because:
+- It's a diagnostic method
+- If it fails, it returns `null` and logs
+- The app doesn't crash
+
+---
+
+### 📊 Complete Example
+
+```kotlin
+// Your app's certificate flow:
+
+// 1. Your app is built and signed with a certificate
+//    ┌─────────────────┐
+//    │  Your App.apk   │
+//    │  ┌──────────┐   │
+//    │  │ CERT.RSA │   │ ← Your signing certificate
+//    │  └──────────┘   │
+//    └─────────────────┘
+
+// 2. This method reads that certificate
+val certificateBytes = getCertificateFromAPK()
+// → [0x1A, 0x2B, 0x3C, ...]
+
+// 3. Hashes it with SHA-256
+val hashBytes = sha256(certificateBytes)
+// → [0xA1, 0xB2, 0xC3, ...]
+
+// 4. Converts to hex string
+val hexString = bytesToHex(hashBytes)
+// → "a1b2c3d4e5f67890..."
+
+// 5. This becomes your app's digital fingerprint
+//    Used to verify "This app is REALLY my app"
+```
+
+---
+
+### 🎯 Summary
+
+| Aspect | Details |
+|--------|---------|
+| **What it does** | Gets your app's signing certificate as SHA-256 hex |
+| **Why two APIs** | Different Android versions, different signature schemes |
+| **Returns** | 64-character hex string or `null` |
+| **Key security** | This is your app's cryptographic identity |
+| **Used for** | Verifying app identity, detecting tampering |
+
+**Bottom Line:** This method is the **foundation of all app identity checks**. Without it, you can't verify if an app is genuine. It handles all Android versions correctly and provides the critical fingerprint needed for App Authenticator to work. 🔐
+
+---
+
+### 💡 Pro Tip: Cache the Result
+
+```kotlin
+private val cachedCertHash by lazy { 
+    signingCertSha256Hex() 
+}
+
+// Use this instead of calling signingCertSha256Hex() repeatedly
+// The certificate NEVER changes while the app is running
+```
