@@ -4,6 +4,13 @@ import android.content.Context
 import android.os.Build
 import androidx.security.state.SecurityStateManagerCompat
 
+/**
+ *
+ *  Gets Global Security State of App
+ *      Prints out bundle of device values
+ *
+ * @property context - Context
+ */
 class SecurityStateLab(private val context: Context) {
 
     fun inspect(): String = buildString {

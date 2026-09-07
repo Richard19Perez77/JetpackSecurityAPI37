@@ -50,6 +50,11 @@ enum class LabDestination(
         "Credential Manager",
         "Platform neighbor for passwords and passkeys",
     ),
+    BANKING(
+        "banking",
+        "Banking app readiness",
+        "Device signals banks use to allow install and login",
+    ),
     BACKUP(
         "backup",
         "Backup exclusion",

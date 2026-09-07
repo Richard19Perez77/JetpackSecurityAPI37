@@ -283,6 +283,28 @@ Alternative: `android:allowBackup="false"` if you have nothing worth restoring.
 
 ---
 
+## 12. Banking app readiness (neighbor)
+
+You **cannot** ask Play “will *this* bank’s APK install on *this* phone?” from a third-party app. Country, ABI, `minSdk` in *that* APK, and the bank’s Play Integrity Cloud project are private.
+
+What you **can** do is score the same device signals banks use after install (and that Play uses for certified devices):
+
+- API 28+ (typical 2026 floor in this lab)
+- not an emulator
+- `user` build without `test-keys`
+- secure lock screen
+- hardware-backed Keystore (TEE/StrongBox)
+- Play Store + Play services
+- Verified Boot green / bootloader locked (when the property is readable)
+- no obvious `su` / Magisk package
+- security patch newer than one year
+
+**Green banner** = no *blocking* failures. **Red** = at least one blocking failure; each row still shows PASS/FAIL. StrongBox, Class 3 biometrics, and ADB are optional (they do not turn the banner red).
+
+Play Integrity’s `MEETS_STRONG_INTEGRITY` token still needs your backend. This lab only checks that Play services exist.
+
+---
+
 ## How the sample app is laid out
 
 ```
@@ -294,6 +316,7 @@ Alternative: `android:allowBackup="false"` if you have nothing worth restoring.
   state/           live SPL + mock OEM
   biometric/       auth-bound AES key
   credentials/     Credential Manager probe
+  banking/         typical banking-app device policy
   backup/          lists excluded paths
   ui/              catalog + simple labs
 
@@ -310,7 +333,7 @@ Switch **API era** on Encrypted preferences and Encrypted files. Other labs are 
 Still important, but not `androidx.security` and not implemented here:
 
 - TLS / certificate pinning
-- Play Integrity / SafetyNet
+- Play Integrity token decryption (needs a Cloud project and your backend)
 - Encrypted File-Based Encryption of the whole device (that is Android itself)
 - SQLCipher / encrypted Room
 - Network security config
@@ -326,5 +349,203 @@ Still important, but not `androidx.security` and not implemented here:
 4. Keystore, Backup, Biometric.
 5. Identity Credential and Security State (specialized).
 6. Credential Manager (login neighbor).
+7. Banking app readiness (device policy banks use; not a specific bank’s Play listing).
 
 Official index: [Jetpack Security releases](https://developer.android.com/jetpack/androidx/releases/security).
+
+---
+
+# SecurityStateLab
+
+This is a **security state inspection class** for Android applications, specifically designed for API level 37 (Android 15+). Let me break down what this class does:
+
+## Purpose
+`SecurityStateLab` provides a diagnostic tool to inspect and report on the security state of an Android device and application.
+
+## Key Components
+
+### Constructor
+- Takes a `Context` parameter to access system services
+
+### Main Method: `inspect()`
+Returns a formatted string report containing:
+1. **Build information** - Compile/target SDK (37) and device SDK version
+2. **Security patch level** - The device's security patch date
+3. **Live security state** - Real-time data from the system
+4. **Mock OEM provider report** - Sample data showing what an OEM update provider might return
+
+### `readLiveBundle()`
+- Uses `SecurityStateManagerCompat` (a compatibility wrapper for Android's security state APIs)
+- Calls `getGlobalSecurityState()` to retrieve a bundle of security-related information
+- Handles errors gracefully (returns error messages or indicates empty bundles, which is common on emulators)
+- Formats the bundle contents as key-value pairs
+
+### `mockOemProviderReport()`
+- Provides **sample/demo data** showing what an OEM (Original Equipment Manufacturer) update provider might report
+- Contains mock update information for:
+  - **System component** - SPL: 2026-09-01
+  - **Vendor component** - SPL: 2026-08-05  
+  - **Kernel component** - SPL: 6.1.lts-demo
+- Includes a note explaining that this is just a demonstration and that apps typically consume `SecurityStateManagerCompat` rather than hosting their own update services
+
+## Important Notes
+
+1. **API 37+ Feature**: This uses Android's newer security state APIs introduced in SDK 35+
+2. **Compatibility**: Uses `Compat` versions of classes for backward compatibility
+3. **Real vs Mock Data**: The live data comes from the actual device, while the OEM report is just sample data for demonstration
+4. **Emulator Handling**: Gracefully handles empty bundles which are common on emulators
+
+## Use Case
+This class would typically be used in a security/diagnostics screen within an app to:
+- Display the device's current security posture
+- Help users understand their device's update status
+- Debug security-related issues
+- Demonstrate the use of Android's security state APIs
+
+The class is well-documented and handles edge cases (like emulators) appropriately, making it suitable for both production use and educational purposes.
+
+---
+
+Great question! As an introductory developer, let me give you a **practical, no-nonsense answer**:
+
+## Do You Need to Use This? 
+
+**Short answer: Probably not.** For 90%+ of apps, you can completely ignore this.
+
+**Longer answer:** Only if you're building security-critical apps (banking, healthcare, government) or need to enforce specific security policies.
+
+---
+
+## When You WOULD Use This (Real Scenarios)
+
+### 1. **Conditional Feature Locking**
+```kotlin
+// Only enable biometric login if device is reasonably secure
+val state = SecurityStateLab(context).inspect()
+if (hasRecentSecurityPatch(state)) {
+    enableBiometricLogin()
+} else {
+    showWarningAndUsePinOnly()
+}
+```
+
+### 2. **Security Warnings**
+```kotlin
+// Warn users with outdated security patches
+if (isSecurityPatchOlderThan(state, "2025-01-01")) {
+    showDialog("Your device hasn't received security updates in over a year")
+}
+```
+
+### 3. **Compliance Requirements**
+```kotlin
+// For apps handling sensitive data (HIPAA, GDPR, PCI-DSS)
+if (getDeviceSecurityLevel() < MINIMUM_SECURITY_LEVEL) {
+    preventAccess("Device doesn't meet security requirements")
+}
+```
+
+---
+
+## When You DON'T Need This (Most Apps)
+
+✅ Simple games  
+✅ Social media apps  
+✅ News/weather apps  
+✅ Shopping apps (non-payment)  
+✅ Utility apps (flashlight, notes, etc.)  
+
+**Just let the Android system handle security automatically.**
+
+---
+
+## What You Should ACTUALLY Focus On (More Important)
+
+| Priority | What to Do | Why |
+|----------|------------|-----|
+| **1** | Use HTTPS for all network calls | Prevents man-in-the-middle attacks |
+| **2** | Encrypt sensitive data with Android Keystore | Protects user data |
+| **3** | Validate all user input | Prevents injection attacks |
+| **4** | Use ProGuard/R8 obfuscation | Makes reverse engineering harder |
+| **5** | Store passwords with hashing (not plaintext!) | Critical security practice |
+| **6** | This SecurityStateManager stuff | **Last priority** |
+
+---
+
+## Practical Example: Should You Use It?
+
+### Scenario: Building a Banking App
+**YES**, you should check:
+- Security patch level (ensure device has recent updates)
+- Report suspiciously old patches to your backend
+- Potentially block transactions on compromised devices
+
+### Scenario: Building a Cooking Recipe App
+**NO**, don't waste time on this. Users just want to see recipes!
+
+---
+
+## How to Use It (If You Decide To)
+
+```kotlin
+class MySecurityPolicy(private val context: Context) {
+    
+    private val securityLab = SecurityStateLab(context)
+    
+    fun isDeviceSecure(): Boolean {
+        val report = securityLab.inspect()
+        
+        // Parse the security patch date
+        val patchDate = extractPatchDate(report) // "2026-09-01"
+        val sixMonthsAgo = getDateSixMonthsAgo()
+        
+        // 1. Check if security patch is recent
+        if (patchDate < sixMonthsAgo) {
+            return false // Device hasn't been updated in 6+ months
+        }
+        
+        // 2. Check if WebView version is recent (optional)
+        val webviewVersion = extractWebViewVersion(report) // "150.0.7871.181"
+        if (webviewVersion < 140) { // Arbitrary threshold
+            return false // Older WebView might have vulnerabilities
+        }
+        
+        return true
+    }
+    
+    fun getSecurityLevel(): SecurityLevel {
+        return when {
+            isDeviceSecure() -> SecurityLevel.GREEN
+            isDeviceSecure() && !hasRecentPatch() -> SecurityLevel.YELLOW
+            else -> SecurityLevel.RED
+        }
+    }
+}
+```
+
+---
+
+## My Recommendation for You
+
+**For learning purposes**: YES, play with it! Understanding system security is valuable.
+- Print the report in a debug screen
+- Experiment with different emulator/device configurations
+- See how the values change
+
+**For production apps**: ONLY if your app has specific security requirements.
+- Otherwise, save your energy for more impactful security practices (HTTPS, encryption, input validation)
+
+---
+
+## The Bottom Line
+
+This is **advanced, optional security monitoring**. Focus on:
+1. ✅ HTTPS everywhere
+2. ✅ Secure data storage
+3. ✅ User authentication
+4. ✅ Regular updates
+
+**Then**, if you still have time and your app handles sensitive data, consider using this API. Otherwise, **ignore it** and ship your app! 😊
+
+---
+

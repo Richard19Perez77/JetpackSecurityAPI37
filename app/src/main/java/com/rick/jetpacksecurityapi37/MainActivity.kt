@@ -21,6 +21,7 @@ import com.rick.jetpacksecurityapi37.ui.CatalogScreen
 import com.rick.jetpacksecurityapi37.ui.LabDestination
 import com.rick.jetpacksecurityapi37.ui.labs.AuthenticatorLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.BackupLabScreen
+import com.rick.jetpacksecurityapi37.ui.labs.BankingLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.BiometricLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.CredentialManagerLabScreen
 import com.rick.jetpacksecurityapi37.ui.labs.EncryptedFilesLab
@@ -74,6 +75,7 @@ class MainActivity : FragmentActivity() {
                         composable(LabDestination.STATE.route) { SecurityStateLabScreen() }
                         composable(LabDestination.BIOMETRIC.route) { BiometricLabScreen() }
                         composable(LabDestination.CREDENTIALS.route) { CredentialManagerLabScreen() }
+                        composable(LabDestination.BANKING.route) { BankingLabScreen() }
                         composable(LabDestination.BACKUP.route) { BackupLabScreen() }
                     }
                 }
