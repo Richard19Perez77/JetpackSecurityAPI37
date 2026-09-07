@@ -2127,3 +2127,716 @@ private val cachedCertHash by lazy {
 // Use this instead of calling signingCertSha256Hex() repeatedly
 // The certificate NEVER changes while the app is running
 ```
+
+---
+
+## Deep Dive: `BackupLab` Class
+
+This is a **diagnostic class** that helps you understand and verify your app's **backup configuration** - specifically around **encrypted data security**. Let me break it down completely.
+
+---
+
+### 🎯 What This Class Does
+
+It **inspects and reports** on your app's backup settings to ensure that **encrypted cryptographic keys and sensitive data are NOT backed up** to the cloud.
+
+**The core problem it addresses:**
+> If encrypted data is backed up, it becomes useless when restored on a new device because the encryption keys are tied to the original device's hardware!
+
+---
+
+### 🔐 The Critical Security Problem
+
+#### The Scenario:
+```kotlin
+// 1. User installs your app on Phone A
+// 2. App generates encryption keys stored in Android Keystore (hardware-backed)
+// 3. App encrypts user data using these keys
+// 4. Android Auto-Backup runs and backs up the ENCRYPTED data
+// 5. User gets Phone B, restores from backup
+// 6. App tries to decrypt data with keys from Phone A
+// 7. ❌ FAILS! Keys don't exist on Phone B!
+// 8. User loses all their data! 😱
+```
+
+#### The Solution:
+```kotlin
+// ✅ EXCLUDE encrypted blobs from backup!
+// Each device must generate its OWN keys
+// Data stays on the device where it was created
+
+// This class checks that your backup configuration correctly
+// excludes ALL encrypted data files
+```
+
+---
+
+### 📋 What This Class Checks
+
+#### 1. **Backup Allowed Flag**
+```kotlin
+val info = context.applicationInfo
+appendLine("applicationInfo.flags BACKUP_ALLOWED: ${(info.flags and android.content.pm.ApplicationInfo.FLAG_ALLOW_BACKUP) != 0}")
+```
+
+**Checks:** Is backup even enabled for your app?
+
+**In your AndroidManifest.xml:**
+```xml
+<application
+    android:allowBackup="true"  <!-- ← This is the setting being checked -->
+    ...>
+```
+
+**Result:**
+- `true` → Backup is enabled (default for most apps)
+- `false` → Backup is disabled (all data stays on device)
+
+**Why this matters:**
+- If `allowBackup = true`, you MUST exclude encrypted data files
+- If `allowBackup = false`, nothing is backed up (safe but less user-friendly)
+
+---
+
+#### 2. **Android Version Check**
+```kotlin
+appendLine("SDK: ${Build.VERSION.SDK_INT} (fullBackupContent used below 31, dataExtractionRules on 31+)")
+```
+
+**Shows which backup configuration system Android is using:**
+
+| Android Version | API Level | Backup Config System |
+|-----------------|-----------|---------------------|
+| **Android 11 and below** | ≤ 30 | `fullBackupContent` (XML) |
+| **Android 12 and above** | ≥ 31 | `dataExtractionRules` (XML) |
+
+**In your manifest:**
+```xml
+<!-- Android 11 and below -->
+<application
+    android:fullBackupContent="@xml/backup_rules"
+    ...>
+
+<!-- Android 12 and above -->
+<application
+    android:dataExtractionRules="@xml/data_extraction_rules"
+    ...>
+```
+
+---
+
+#### 3. **List of Excluded Files**
+```kotlin
+listOf(
+    "sharedpref ${LegacySecretStore.PREFS_NAME}",
+    "sharedpref ${TinkSecretStore.KEYSET_PREFS}",
+    "sharedpref ${TinkBlobStore.KEYSET_PREFS}",
+    "sharedpref ${KeystoreSecretStore.PREFS_NAME}",
+    "file ${LegacyBlobStore.DIR}/",
+    "file ${TinkBlobStore.DIR}/",
+    "file ${KeystoreBlobStore.DIR}/",
+    "file datastore/ (entire directory, including ${TinkSecretStore.DATASTORE_NAME}.preferences_pb)",
+).forEach { appendLine("- $it") }
+```
+
+**This lists EVERY encrypted data file that should be EXCLUDED from backup.**
+
+---
+
+### 🗂️ What Each Excluded Item Is
+
+#### 1. **SharedPreferences (Keysets)**
+```kotlin
+"sharedpref ${LegacySecretStore.PREFS_NAME}"
+"sharedpref ${TinkSecretStore.KEYSET_PREFS}"
+"sharedpref ${TinkBlobStore.KEYSET_PREFS}"
+"sharedpref ${KeystoreSecretStore.PREFS_NAME}"
+```
+
+**What these are:**
+- `SharedPreferences` files storing **cryptographic keysets**
+- These contain encryption keys used by Tink/Keystore
+- If backed up and restored, keys become corrupted or unusable
+
+**Where they live:**
+```
+/data/data/com.rick.jetpacksecurityapi37/shared_prefs/
+├── legacy_secret_prefs.xml          ← LegacySecretStore.PREFS_NAME
+├── tink_keyset_prefs.xml            ← TinkSecretStore.KEYSET_PREFS
+├── tink_blob_keyset_prefs.xml       ← TinkBlobStore.KEYSET_PREFS
+└── keystore_secret_prefs.xml        ← KeystoreSecretStore.PREFS_NAME
+```
+
+**Example backup exclusion:**
+```xml
+<!-- backup_rules.xml (Android 11 and below) -->
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="legacy_secret_prefs.xml" />
+    <exclude domain="sharedpref" path="tink_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="tink_blob_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="keystore_secret_prefs.xml" />
+</full-backup-content>
+```
+
+#### 2. **Directories (Blob Stores)**
+```kotlin
+"file ${LegacyBlobStore.DIR}/"
+"file ${TinkBlobStore.DIR}/"
+"file ${KeystoreBlobStore.DIR}/"
+```
+
+**What these are:**
+- Directories containing **encrypted blobs** (large encrypted data)
+- Each file is encrypted with keys from the respective store
+- If backed up, the encrypted data is useless without the original keys
+
+**Where they live:**
+```
+/data/data/com.rick.jetpacksecurityapi37/files/
+├── legacy_blobs/          ← LegacyBlobStore.DIR
+├── tink_blobs/            ← TinkBlobStore.DIR
+└── keystore_blobs/        ← KeystoreBlobStore.DIR
+```
+
+**Example backup exclusion:**
+```xml
+<!-- backup_rules.xml -->
+<full-backup-content>
+    <exclude domain="file" path="legacy_blobs/" />
+    <exclude domain="file" path="tink_blobs/" />
+    <exclude domain="file" path="keystore_blobs/" />
+</full-backup-content>
+```
+
+#### 3. **DataStore Files**
+```kotlin
+"file datastore/ (entire directory, including ${TinkSecretStore.DATASTORE_NAME}.preferences_pb)"
+```
+
+**What these are:**
+- Modern Android DataStore files (replacing SharedPreferences)
+- Store serialized preferences including keysets
+- Need to be excluded just like SharedPreferences
+
+**Where they live:**
+```
+/data/data/com.rick.jetpacksecurityapi37/files/datastore/
+└── tink_secret_store.preferences_pb  ← TinkSecretStore.DATASTORE_NAME
+```
+
+**Example backup exclusion:**
+```xml
+<!-- backup_rules.xml -->
+<full-backup-content>
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>
+```
+
+---
+
+### 📱 Backup Configuration Files
+
+#### For Android 11 and Below (`backup_rules.xml`):
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Exclude ALL encrypted data -->
+    <exclude domain="sharedpref" path="legacy_secret_prefs.xml" />
+    <exclude domain="sharedpref" path="tink_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="tink_blob_keyset_prefs.xml" />
+    <exclude domain="sharedpref" path="keystore_secret_prefs.xml" />
+    
+    <exclude domain="file" path="legacy_blobs/" />
+    <exclude domain="file" path="tink_blobs/" />
+    <exclude domain="file" path="keystore_blobs/" />
+    <exclude domain="file" path="datastore/" />
+</full-backup-content>
+```
+
+#### For Android 12 and Above (`data_extraction_rules.xml`):
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude ALL encrypted data from cloud backup -->
+        <exclude domain="sharedpref" path="legacy_secret_prefs.xml" />
+        <exclude domain="sharedpref" path="tink_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="tink_blob_keyset_prefs.xml" />
+        <exclude domain="sharedpref" path="keystore_secret_prefs.xml" />
+        
+        <exclude domain="file" path="legacy_blobs/" />
+        <exclude domain="file" path="tink_blobs/" />
+        <exclude domain="file" path="keystore_blobs/" />
+        <exclude domain="file" path="datastore/" />
+    </cloud-backup>
+    
+    <device-transfer>
+        <!-- Also exclude from device-to-device transfer -->
+        <!-- Same exclusions as above -->
+    </device-transfer>
+</data-extraction-rules>
+```
+
+---
+
+### 🔒 Why Encrypted Data Must Be Excluded
+
+#### The Problem Visualized:
+
+```mermaid
+graph TD
+    A[App on Phone A] --> B[Generates Encryption Keys]
+    B --> C[Stores Keys in Android Keystore]
+    C --> D[Encrypts User Data]
+    D --> E[Stores Encrypted Data in Files]
+    E --> F[Android Auto-Backup Runs]
+    F --> G[BACKS UP Encrypted Data]
+    
+    H[User gets Phone B] --> I[Restores from Backup]
+    I --> J[Encrypted Data Restored]
+    J --> K[App Tries to Decrypt]
+    K --> L[❌ NO KEYS!]
+    L --> M[Data Lost Forever]
+```
+
+#### The Solution:
+
+```mermaid
+graph TD
+    A[App on Phone A] --> B[Generates Encryption Keys]
+    B --> C[Stores Keys in Android Keystore]
+    C --> D[Encrypts User Data]
+    D --> E[Stores Encrypted Data in Files]
+    E --> F[Android Auto-Backup Runs]
+    F --> G[✅ EXCLUDES Encrypted Data]
+    
+    H[User gets Phone B] --> I[Restores from Backup]
+    I --> J[❌ No Encrypted Data Restored]
+    J --> K[App Regenerates Keys]
+    K --> L[✅ Fresh Data Created]
+```
+
+---
+
+### 🎯 What This Lab Actually Does
+
+```kotlin
+// Run this in your app:
+val lab = BackupLab(context)
+Log.d("BackupLab", lab.inspect())
+
+// Output:
+// applicationInfo.flags BACKUP_ALLOWED: true
+// SDK: 34 (fullBackupContent used below 31, dataExtractionRules on 31+)
+//
+// Encrypted blobs must not restore onto a new device whose Keystore is empty.
+// This app keeps allowBackup=true and excludes the files listed in backup_rules.xml / data_extraction_rules.xml:
+// 
+// - sharedpref legacy_secret_prefs.xml
+// - sharedpref tink_keyset_prefs.xml
+// - sharedpref tink_blob_keyset_prefs.xml
+// - sharedpref keystore_secret_prefs.xml
+// - file legacy_blobs/
+// - file tink_blobs/
+// - file keystore_blobs/
+// - file datastore/ (entire directory, including tink_secret_store.preferences_pb)
+```
+
+---
+
+### ✅ What This Lab Verifies
+
+| Check | What It Verifies |
+|-------|------------------|
+| **Backup Allowed** | App has backup enabled |
+| **SDK Version** | Which backup config system is used |
+| **File Exclusions** | ALL encrypted data is excluded |
+| **Completeness** | No encrypted file is accidentally backed up |
+
+---
+
+### 🚨 What Could Go Wrong
+
+#### Problem 1: Forgot to Exclude a File
+```kotlin
+// ❌ If ANY encrypted file is backed up:
+// - User upgrades phone
+// - Encrypted file restores
+// - App tries to decrypt with new keys
+// - 🚨 Decryption fails!
+// - User data is corrupted/lost
+```
+
+#### Problem 2: Using Wrong Config File
+```xml
+<!-- ❌ For Android 12+, using fullBackupContent instead of dataExtractionRules -->
+<application
+    android:fullBackupContent="@xml/backup_rules"  <!-- Wrong! -->
+    ...>
+    
+<!-- ✅ Should be: -->
+<application
+    android:dataExtractionRules="@xml/data_extraction_rules"  <!-- Correct! -->
+    ...>
+```
+
+#### Problem 3: Incomplete Exclusions
+```xml
+<!-- ❌ Missing some encrypted files -->
+<exclude domain="sharedpref" path="legacy_secret_prefs.xml" />
+<!-- Forgot: tink_keyset_prefs.xml -->
+<!-- Forgot: keystore_secret_prefs.xml -->
+
+<!-- ✅ Complete exclusions -->
+<exclude domain="sharedpref" path="legacy_secret_prefs.xml" />
+<exclude domain="sharedpref" path="tink_keyset_prefs.xml" />
+<exclude domain="sharedpref" path="tink_blob_keyset_prefs.xml" />
+<exclude domain="sharedpref" path="keystore_secret_prefs.xml" />
+```
+
+---
+
+### 📊 Summary
+
+| Aspect | Details |
+|--------|---------|
+| **Purpose** | Verify encrypted data is excluded from backup |
+| **Why** | Keys are hardware-bound, can't be restored on new devices |
+| **What it checks** | Backup flag, Android version, file exclusions |
+| **What to exclude** | SharedPreferences with keys, blob directories, DataStore |
+| **What happens if not excluded** | Data corruption, user data loss, app crashes |
+
+**Bottom Line:** This lab ensures your app won't lose encrypted data when users upgrade devices. Without proper exclusions, encrypted data becomes **unrecoverable** on new devices, leading to data loss and user frustration. This diagnostic class helps you verify your backup configuration is correct! 🔐📱
+
+---
+
+## Why Different Stores? Understanding the Crypto Architecture
+
+Excellent question! This app uses **multiple storage mechanisms** for encryption. Let me explain why each exists and when they're used.
+
+---
+
+### 🎯 The Big Picture: Why Multiple Stores?
+
+Your app uses **3 different cryptographic libraries/systems**:
+
+| Store Type | Library | Purpose |
+|------------|---------|---------|
+| **LegacyStore** | Custom/Deprecated | Backward compatibility |
+| **TinkStore** | Google Tink | Modern, secure, recommended |
+| **KeystoreStore** | Android Keystore | Hardware-backed security |
+
+**Why not just one?**
+- **Migration**: Moving from old to new systems
+- **Security levels**: Different needs for different data
+- **Backward compatibility**: Supporting older Android versions
+- **Use cases**: Some data needs hardware protection, some doesn't
+
+---
+
+### 🔍 Store-by-Store Breakdown
+
+#### 1. **LegacyStore** (The Old Way)
+```kotlin
+class LegacySecretStore  // SharedPreferences-based
+class LegacyBlobStore    // File-based
+```
+
+**What it is:**
+- Custom encryption implementation
+- Likely used before Tink existed
+- Keys stored in SharedPreferences
+
+**Why keep it?**
+```kotlin
+// ⚠️ Users with older app versions have data encrypted this way
+// When they upgrade, this data MUST still be readable
+
+// Scenario:
+// 1. User installed app v1.0 (used LegacyStore)
+// 2. User has data encrypted with LegacyStore
+// 3. User upgrades to v2.0 (now uses Tink)
+// 4. App MUST still read LegacyStore data
+// 5. Or better: Migrate LegacyStore data to Tink
+```
+
+**When it's used:**
+- Reading data created by older app versions
+- Migration to newer systems
+- Fallback if newer systems fail
+
+---
+
+#### 2. **TinkStore** (The Modern Way)
+```kotlin
+class TinkSecretStore   // DataStore-based
+class TinkBlobStore     // File-based
+```
+
+**What it is:**
+- **Google Tink** - Google's official crypto library
+- Modern, well-audited, secure defaults
+- Keys stored in DataStore (modern SharedPreferences replacement)
+
+**Why use Tink?**
+```kotlin
+// ✅ Modern encryption (AES256-GCM, AES256-SIV)
+// ✅ Well-tested by Google
+// ✅ Handles key rotation
+// ✅ Better than custom implementations
+// ✅ Actively maintained
+// ✅ Safer defaults (prevents developer mistakes)
+```
+
+**When it's used:**
+- All NEW data
+- Most sensitive data (user credentials, personal info)
+- Future-proof encryption
+
+---
+
+#### 3. **KeystoreStore** (Hardware-Backed)
+```kotlin
+class KeystoreSecretStore  // SharedPreferences + Keystore
+class KeystoreBlobStore    // File + Keystore
+```
+
+**What it is:**
+- Uses **Android Keystore System**
+- Keys stored in hardware (secure element/TEE)
+- Most secure option
+
+**Why use Keystore?**
+```kotlin
+// 🔐 Keys NEVER leave hardware
+// 🔐 Protected from malware
+// 🔐 Unlocked with device PIN/password
+// 🔐 Destroyed if device is rooted
+
+// Example: Payment information, biometric data
+// Most sensitive data goes here
+```
+
+**When it's used:**
+- Most sensitive data (payment info, biometrics)
+- Data that must be tied to the device
+- Regulatory/compliance requirements (GDPR, HIPAA, PCI-DSS)
+
+---
+
+### 📊 Comparison Table
+
+| Feature | LegacyStore | TinkStore | KeystoreStore |
+|---------|-------------|-----------|---------------|
+| **Security** | ⚠️ Low | ✅ High | ✅✅ Highest |
+| **Hardware-backed** | ❌ No | ❌ No | ✅ Yes |
+| **Modern crypto** | ❌ Custom | ✅ Tink | ✅ Tink + HW |
+| **Key export** | ✅ Can export | ✅ Can export | ❌ Never exported |
+| **Backup safe** | ⚠️ Must exclude | ⚠️ Must exclude | ✅ Auto-excluded |
+| **Performance** | ⚡ Fast | ⚡ Fast | 🐢 Slower (HW ops) |
+| **Android support** | All versions | All versions | API 18+ (Keystore) |
+| **Migration needed** | ✅ Yes | ❌ No | ❌ No |
+
+---
+
+### 🗂️ What Each Store Stores
+
+#### LegacyStore Files:
+```kotlin
+// Secret store (keys)
+/data/data/com.rick.jetpacksecurityapi37/shared_prefs/
+└── legacy_secret_prefs.xml  // ← Contains encryption keys (old system)
+
+// Blob store (encrypted data)
+/data/data/com.rick.jetpacksecurityapi37/files/
+└── legacy_blobs/
+    ├── user_data_1.enc
+    ├── user_data_2.enc
+    └── ... (old encrypted files)
+```
+
+#### TinkStore Files:
+```kotlin
+// Secret store (keys)
+/data/data/com.rick.jetpacksecurityapi37/files/datastore/
+└── tink_secret_store.preferences_pb  // ← Contains Tink keyset
+
+// Keyset backup (for migration)
+/data/data/com.rick.jetpacksecurityapi37/shared_prefs/
+└── tink_keyset_prefs.xml  // ← Legacy keyset storage
+
+// Blob store (encrypted data)
+/data/data/com.rick.jetpacksecurityapi37/files/
+└── tink_blobs/
+    ├── data_1.enc
+    ├── data_2.enc
+    └── ... (Tink-encrypted files)
+```
+
+#### KeystoreStore Files:
+```kotlin
+// Secret store (keys - metadata only!)
+/data/data/com.rick.jetpacksecurityapi37/shared_prefs/
+└── keystore_secret_prefs.xml  // ← ONLY references, NOT actual keys!
+
+// Actual keys are in Android Keystore (hardware)
+// Cannot be accessed directly!
+
+// Blob store (encrypted data)
+/data/data/com.rick.jetpacksecurityapi37/files/
+└── keystore_blobs/
+    ├── payment_data_1.enc
+    ├── payment_data_2.enc
+    └── ... (HW-encrypted files)
+```
+
+---
+
+### 🔄 Migration Path
+
+#### From Legacy → Tink:
+```kotlin
+class MigrationManager {
+    fun migrateLegacyToTink() {
+        // 1. Read data from LegacyStore
+        val legacyData = legacyStore.readAll()
+        
+        // 2. Decrypt with old keys
+        val decryptedData = legacyStore.decrypt(legacyData)
+        
+        // 3. Re-encrypt with Tink
+        val tinkEncrypted = tinkStore.encrypt(decryptedData)
+        
+        // 4. Store in TinkStore
+        tinkStore.save(tinkEncrypted)
+        
+        // 5. Mark as migrated
+        sharedPrefs.edit().putBoolean("migrated_to_tink", true).apply()
+        
+        // 6. Optionally, delete old data
+        // legacyStore.deleteAll()
+    }
+}
+```
+
+#### From Tink → Keystore (for sensitive data):
+```kotlin
+class SecurityUpgrader {
+    fun upgradeToHardwareBacked(dataId: String) {
+        // 1. Decrypt from Tink
+        val data = tinkStore.decrypt(dataId)
+        
+        // 2. Re-encrypt with Keystore
+        val secured = keystoreStore.encrypt(data)
+        
+        // 3. Store in KeystoreStore
+        keystoreStore.save(secured)
+        
+        // 4. Remove from TinkStore
+        tinkStore.delete(dataId)
+        
+        // 5. Log migration
+        logSecurityUpgrade(dataId)
+    }
+}
+```
+
+---
+
+### 🎯 Why This Matters for Backup
+
+#### Different Stores = Different Backup Requirements:
+
+```kotlin
+// Each store has files that MUST be excluded from backup:
+
+class BackupExclusions {
+    fun getExclusions(): List<String> {
+        return listOf(
+            // LegacyStore - Exclude everything
+            "sharedpref ${LegacySecretStore.PREFS_NAME}",
+            "file ${LegacyBlobStore.DIR}/",
+            
+            // TinkStore - Exclude everything
+            "sharedpref ${TinkSecretStore.KEYSET_PREFS}",
+            "file ${TinkBlobStore.DIR}/",
+            "file datastore/ (${TinkSecretStore.DATASTORE_NAME}.preferences_pb)",
+            
+            // KeystoreStore - Exclude file blobs (keys are in hardware)
+            "sharedpref ${KeystoreSecretStore.PREFS_NAME}",
+            "file ${KeystoreBlobStore.DIR}/",
+        )
+    }
+}
+```
+
+**Why KeystoreStore is special:**
+```kotlin
+// ⚠️ CRITICAL: Keystore keys are in HARDWARE
+// They CANNOT be backed up or restored
+// The files in KeystoreStore contain ONLY encrypted data
+// If the data is backed up, it cannot be decrypted on new devices
+// Because the hardware keys don't exist there!
+
+// ✅ Solution: Exclude ALL encrypted data files
+// ✅ Keys stay in hardware, never leave the device
+// ✅ New device = new keys = new data
+```
+
+---
+
+### 📊 Usage Decision Tree
+
+```kotlin
+fun chooseEncryptionStore(data: Data): CryptoStore {
+    return when {
+        // Most sensitive: Payment info, biometrics, PII
+        data.sensitivity == Sensitivity.HIGH -> 
+            KeystoreStore()  // 🔐 Hardware-backed
+            
+        // Medium sensitivity: User settings, profiles
+        data.sensitivity == Sensitivity.MEDIUM && Build.VERSION.SDK_INT >= 23 ->
+            TinkStore()  // ✅ Modern crypto
+            
+        // Need backward compatibility
+        data.createdBy == AppVersion.V1_0 ->
+            LegacyStore()  // ⚠️ Old format
+            
+        // Old Android versions
+        Build.VERSION.SDK_INT < 23 ->
+            TinkStore()  // ✅ Tink works on all versions
+            
+        // Default: Modern secure crypto
+        else ->
+            TinkStore()  // 🎯 Recommended
+    }
+}
+```
+
+---
+
+### 🎯 Summary
+
+| Store | Why It Exists | When to Use |
+|-------|--------------|-------------|
+| **LegacyStore** | Backward compatibility | Reading old data, migration |
+| **TinkStore** | Modern, secure, Google-maintained | All new data (default) |
+| **KeystoreStore** | Hardware-backed security | Most sensitive data |
+
+**The BackupLab ensures:**
+- ✅ ALL encrypted data is excluded from backup
+- ✅ NO accidental backup of crypto material
+- ✅ Users won't lose data when upgrading devices
+
+**The multiple stores provide:**
+- **Flexibility** - Choose security level per data type
+- **Compatibility** - Support old devices and data formats
+- **Security** - Use hardware-backed keys when needed
+- **Future-proofing** - Migrate to better systems over time
+
+Without multiple stores, you'd be locked into one system forever. With them, you can evolve your security architecture! 🚀🔐
+
+---
+
+

@@ -9,6 +9,24 @@ import com.rick.jetpacksecurityapi37.crypto.LegacySecretStore
 import com.rick.jetpacksecurityapi37.crypto.TinkBlobStore
 import com.rick.jetpacksecurityapi37.crypto.TinkSecretStore
 
+/**
+ * Diagnostic class to help you understand and verify your app's backup configuration.
+ *      encrypted data security
+ *      inspect and report your app's backup settings
+ *      ensures encrypted cryptographic keys and sensitive data are not backed up to the cloud
+ *
+ *  If encrypted data is backed up, it becomes useless when restored on a new device because the encryption keys are tied to the original device's hardware.
+ *
+ *  Encrypted blobs must not restore onto a new device whose Keystore is empty.
+ *
+ * Store Type	    Library	                Purpose
+ * ----------------------------------------------------------------------
+ * LegacyStore	    Custom/Deprecated	    Backward compatibility
+ * TinkStore	    Google Tink	            Modern, secure, recommended
+ * KeystoreStore	Android Keystore	    Hardware-backed security
+ *
+ * @property context - passed in context
+ */
 class BackupLab(private val context: Context) {
 
     fun inspect(): String = buildString {
